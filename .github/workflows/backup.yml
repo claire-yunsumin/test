@@ -1,0 +1,38 @@
+name: Daily Supabase Backup
+
+on:
+  schedule:
+    - cron: '0 15 * * *'
+  workflow_dispatch: 
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. npx 대신 수파베이스 공식 설치 액션을 사용하여 안정적으로 CLI를 세팅합니다.
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      # 2. API로 프로젝트를 먼저 연결(Link)하여 IPv6 네트워크 차단 문제를 우회합니다.
+      - name: Link and Backup Database
+        run: |
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_ID }}" --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
+          supabase db dump -f supabase_backup.sql
+        env:
+          SUPABASE_ACCESS_TOKEN: "${{ secrets.SUPABASE_ACCESS_TOKEN }}"
+
+      - name: Commit and Push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add supabase_backup.sql
+          git commit -m "Daily DB Backup: $(date +'%Y-%m-%d')" || exit 0
+          git push
