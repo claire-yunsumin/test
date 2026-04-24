@@ -41,18 +41,20 @@ export function Badge({ tone, children }: { tone: string; children: ReactNode })
 export function Tabs({
   value,
   onChange,
-  tabs
+  tabs,
+  variant = "default"
 }: {
   value: string;
   onChange: (v: string) => void;
   tabs: Array<{ value: string; label: string; count?: number }>;
+  variant?: "default" | "segmented";
 }) {
   return (
-    <div className="tabs">
+    <div className={`tabs tabs-${variant}`} role="tablist">
       {tabs.map((tab) => (
-        <button key={tab.value} className={value === tab.value ? "active" : ""} onClick={() => onChange(tab.value)}>
-          {tab.label}
-          {typeof tab.count === "number" && <span>{tab.count}</span>}
+        <button key={tab.value} className={value === tab.value ? "active" : ""} onClick={() => onChange(tab.value)} role="tab" aria-selected={value === tab.value}>
+          <span className="tab-label">{tab.label}</span>
+          {typeof tab.count === "number" && <span className="tab-count">{tab.count}</span>}
         </button>
       ))}
     </div>
@@ -62,20 +64,45 @@ export function Tabs({
 export function Select({
   value,
   onChange,
-  options
+  options,
+  label,
+  tone = "default"
 }: {
   value: string;
   onChange: (value: string) => void;
   options: Array<[string, string]>;
+  label?: string;
+  tone?: "default" | "filter" | "inline";
 }) {
+  const selected = options.find(([v]) => v === value)?.[1] ?? value;
   return (
-    <select value={value} onChange={(event) => onChange(event.target.value)}>
-      {options.map(([v, label]) => (
-        <option key={v} value={v}>
-          {label}
-        </option>
-      ))}
-    </select>
+    <label className={`select-control select-${tone}`}>
+      <div className="select-frame">
+        {label && <em className="select-inline-label">{label}</em>}
+        <strong className="select-value">{selected}</strong>
+        <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={label ?? selected}>
+          {options.map(([v, optionLabel]) => (
+            <option key={v} value={v}>
+              {optionLabel}
+            </option>
+          ))}
+        </select>
+      </div>
+    </label>
+  );
+}
+
+export function FilterShell({ children, meta, action }: { children: ReactNode; meta?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="filter-shell">
+      <div className="filter-controls">{children}</div>
+      {(meta || action) && (
+        <div className="filter-meta">
+          <div>{meta}</div>
+          {action}
+        </div>
+      )}
+    </div>
   );
 }
 

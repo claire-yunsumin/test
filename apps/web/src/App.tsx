@@ -1,11 +1,13 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   INBOX_COMPONENTS,
   STATE_META,
+  STRUCTURE_META,
   TEMPLATE_META,
   type Analytics,
   type AppData,
   type DecisionType,
+  type Mention,
   type InboxComponent,
   type Member,
   type Note,
@@ -17,7 +19,7 @@ import {
   type ThreadComment,
   type TimelineEvent
 } from "@hwe/shared";
-import { Badge, Centered, Meta, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "./components/ui";
+import { Badge, Centered, FilterShell, Meta, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "./components/ui";
 import { request } from "./lib/api";
 import { currentRoute, go, type Route } from "./lib/router";
 import type { TaskDetail, TaskView } from "./lib/viewTypes";
@@ -56,6 +58,15 @@ const eventLabel: Record<string, string> = {
   COMPLETED: "완료",
   CANCELED: "취소"
 };
+const fallbackTemplateLabel = "자유 노드";
+
+function templateTone(type: TemplateType | null | undefined) {
+  return type ? TEMPLATE_META[type].tone : "slate";
+}
+
+function templateLabel(type: TemplateType | null | undefined) {
+  return type ? TEMPLATE_META[type].label : fallbackTemplateLabel;
+}
 
 function formatDate(value: string | null | undefined) {
   if (!value) return "-";
@@ -66,6 +77,21 @@ function elapsed(value: string) {
   const hours = Math.max(1, Math.round((Date.now() - new Date(value).getTime()) / 36e5));
   if (hours < 24) return `${hours}시간 전`;
   return `${Math.round(hours / 24)}일 전`;
+}
+
+function formatFailure(cause: string, impact: string, nextAction: string) {
+  return `${cause}. ${impact}. ${nextAction}.`;
+}
+
+function isDueToday(value: string | null | undefined) {
+  if (!value) return false;
+  const today = new Date();
+  const due = new Date(value);
+  return (
+    due.getFullYear() === today.getFullYear() &&
+    due.getMonth() === today.getMonth() &&
+    due.getDate() === today.getDate()
+  );
 }
 
 function hasChangedSinceSeen(task: TaskView, parent: TaskView | null, userId: string) {
@@ -82,10 +108,29 @@ function toggleId(ids: string[], id: string) {
   return ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id];
 }
 
+function useDebouncedEffect(effect: () => void, deps: unknown[], delay = 900) {
+  useEffect(() => {
+    const timer = window.setTimeout(effect, delay);
+    return () => window.clearTimeout(timer);
+  }, deps);
+}
+
+function pct(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function densitySignal(task: TaskView) {
+  return task.activity.notesCount + task.activity.commentsCount + task.activity.filesCount;
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => currentRoute());
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [density, setDensity] = useState<"compact" | "comfortable">(() => {
+    const stored = window.localStorage.getItem("ui-density");
+    return stored === "comfortable" ? "comfortable" : "compact";
+  });
 
   const reload = async () => {
     try {
@@ -102,6 +147,10 @@ export function App() {
     void reload();
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("ui-density", density);
+  }, [density]);
 
   if (error) {
     return (
@@ -127,11 +176,20 @@ export function App() {
   }
 
   return (
-    <Shell route={route.path} me={data.me} inbox={data.inbox} onNavigate={go}>
+    <Shell
+      route={route.path}
+      me={data.me}
+      inbox={data.inbox}
+      tasks={data.tasks as TaskView[]}
+      analytics={data.analytics}
+      onNavigate={go}
+      density={density}
+      onToggleDensity={() => setDensity((prev) => (prev === "compact" ? "comfortable" : "compact"))}
+    >
       {route.path.startsWith("/tasks/") && route.taskId ? (
         <TaskWorkspace taskId={route.taskId} me={data.me} onReload={reload} />
       ) : route.path === "/tasks" ? (
-        <TasksView tasks={data.tasks as TaskView[]} members={data.members} onReload={reload} />
+        <TasksView tasks={data.tasks as TaskView[]} members={data.members} me={data.me} onReload={reload} />
       ) : route.path === "/graph" ? (
         <DecisionGraphView data={data} />
       ) : route.path === "/inbox" ? (
@@ -143,7 +201,7 @@ export function App() {
       ) : route.path === "/admin/analytics" ? (
         <AnalyticsView analytics={data.analytics} />
       ) : (
-        <HierarchyView data={data} />
+        <HierarchyView data={data} onReload={reload} />
       )}
     </Shell>
   );
@@ -153,20 +211,34 @@ function Shell({
   route,
   me,
   inbox,
+  tasks,
+  analytics,
   onNavigate,
+  density,
+  onToggleDensity,
   children
 }: {
   route: string;
   me: Member;
   inbox: AppData["inbox"];
+  tasks: TaskView[];
+  analytics: Analytics;
   onNavigate: (path: string) => void;
+  density: "compact" | "comfortable";
+  onToggleDensity: () => void;
   children: ReactNode;
 }) {
   const unread = inbox.filter((item) => !item.readAt).length;
-	  const links = [
-		    { path: "/hierarchy", label: "계층", mark: "H" },
-		    { path: "/graph", label: "결정 그래프", mark: "G" },
-		    { path: "/inbox", label: "알림함", mark: String(unread) },
+  const pending = tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length;
+  const done = tasks.filter((task) => task.currentState === "DONE").length;
+  const templated = tasks.filter((task) => task.structureState === "TEMPLATED").length;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [globalQuery, setGlobalQuery] = useState("");
+  const globalResults = tasks
+    .filter((task) => !globalQuery.trim() || `${task.title} ${task.description}`.toLowerCase().includes(globalQuery.toLowerCase()))
+    .slice(0, 8);
+  const links = [
+    { path: "/inbox", label: "알림함", mark: String(unread) },
     { path: "/tasks", label: "태스크", mark: "T" },
     { path: "/templates", label: "템플릿", mark: "P" },
     { path: "/admin/members", label: "멤버", mark: "M" },
@@ -174,7 +246,7 @@ function Shell({
   ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell density-${density}`}>
       <aside className="sidebar">
         <button className="brand" onClick={() => onNavigate("/hierarchy")}>
           <span className="brand-mark">S4</span>
@@ -187,7 +259,7 @@ function Shell({
           {links.map((link) => (
             <button
               key={link.path}
-              className={`nav-item ${route === link.path || (link.path === "/hierarchy" && route === "/") ? "active" : ""}`}
+              className={`nav-item ${route === link.path || (link.path === "/tasks" && ["/tasks", "/hierarchy", "/graph"].includes(route)) ? "active" : ""}`}
               onClick={() => onNavigate(link.path)}
             >
               <span className="nav-mark">{link.mark}</span>
@@ -202,24 +274,62 @@ function Shell({
             <div className="eyebrow">HWE MVP R2/R3</div>
             <strong>결정 워크스페이스</strong>
           </div>
+          <div className="market-tape" aria-label="운영 지표">
+            <span><small>Pending</small><strong>{pending}</strong></span>
+            <span><small>Done</small><strong>{done}</strong></span>
+            <span><small>Templated</small><strong>{templated}/{tasks.length}</strong></span>
+            <span><small>Retention</small><strong>{pct(analytics.weeklyReturnRate)}</strong></span>
+          </div>
           <div className="top-actions">
-            <button className="search-button">검색</button>
+            <button className="density-button" onClick={onToggleDensity}>
+              {density === "compact" ? "Comfortable" : "Compact"}
+            </button>
+            <button className="search-button" onClick={() => setSearchOpen(true)}>검색</button>
             <Badge tone="blue">{roleLabel[me.role]}</Badge>
             <div className="avatar">{me.name.slice(0, 1)}</div>
           </div>
         </header>
         <main>{children}</main>
       </div>
+      {searchOpen && (
+        <div className="modal-backdrop">
+          <section className="command-palette" role="dialog" aria-label="검색">
+            <div className="command-head">
+              <div>
+                <div className="eyebrow">Command Search</div>
+                <h2>결정 대상 검색</h2>
+              </div>
+              <button className="icon-button" onClick={() => setSearchOpen(false)}>×</button>
+            </div>
+            <input autoFocus value={globalQuery} onChange={(event) => setGlobalQuery(event.target.value)} placeholder="노드, 태스크, 설명 검색" />
+            <div className="command-results">
+              {globalResults.map((task) => (
+                <button key={task.id} onClick={() => { setSearchOpen(false); go(`/tasks/${task.id}`); }}>
+                  <span>
+                    <strong>{task.title}</strong>
+                    <small>{templateLabel(task.templateType)} · {STATE_META[task.currentState].label}</small>
+                  </span>
+                  <span className="signal-chip">N{task.activity.notesCount} T{task.activity.commentsCount}</span>
+                </button>
+              ))}
+              {!globalResults.length && <p className="muted">검색 결과가 없습니다.</p>}
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
 
-function HierarchyView({ data }: { data: AppData }) {
+function HierarchyView({ data, onReload }: { data: AppData; onReload: () => Promise<void> }) {
   const tasks = data.tasks as TaskView[];
   const [search, setSearch] = useState("");
   const [type, setType] = useState<"ALL" | TemplateType>("ALL");
   const [state, setState] = useState<"ALL" | TaskState>("ALL");
   const [assignee, setAssignee] = useState("ALL");
+  const [title, setTitle] = useState("");
+  const [parentId, setParentId] = useState<string | null>(null);
+  const [templateId, setTemplateId] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(tasks.map((task) => task.id)));
 
   const filteredIds = useMemo(() => {
@@ -246,7 +356,7 @@ function HierarchyView({ data }: { data: AppData }) {
       if (!filteredIds.has(task.id)) return;
       const rows = map.get(task.parentId) ?? [];
       rows.push(task);
-      rows.sort((a, b) => templateOrder.indexOf(a.templateType) - templateOrder.indexOf(b.templateType));
+      rows.sort((a, b) => templateOrder.indexOf(a.templateType ?? "TASK") - templateOrder.indexOf(b.templateType ?? "TASK"));
       map.set(task.parentId, rows);
     });
     return map;
@@ -263,6 +373,16 @@ function HierarchyView({ data }: { data: AppData }) {
     });
   };
 
+  const createNode = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim()) return;
+    const task = await request<TaskView>("/api/tasks", { method: "POST", body: JSON.stringify({ title, parentId, templateId: templateId || null }) });
+    setTitle("");
+    setTemplateId("");
+    setParentId(task.id);
+    await onReload();
+  };
+
   return (
     <section className="page-stack">
       <PageHeader
@@ -270,15 +390,24 @@ function HierarchyView({ data }: { data: AppData }) {
         title="결정 대상 구조"
         action={<button className="button primary" onClick={() => go("/tasks")}>새 태스크</button>}
       />
-      <div className="toolbar">
+      <FilterShell
+        meta={<span>{filteredIds.size} visible · {tasks.length} total</span>}
+        action={<button className="button secondary" onClick={() => { setSearch(""); setType("ALL"); setState("ALL"); setAssignee("ALL"); }}>필터 초기화</button>}
+      >
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="태스크 검색" />
-        <Select value={type} onChange={(v) => setType(v as typeof type)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
-        <Select value={state} onChange={(v) => setState(v as typeof state)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
-        <Select value={assignee} onChange={setAssignee} options={[["ALL", "전체 담당자"], ...data.members.map((m) => [m.id, m.name] as [string, string])]} />
-      </div>
+        <Select label="유형" tone="filter" value={type} onChange={(v) => setType(v as typeof type)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
+        <Select label="상태" tone="filter" value={state} onChange={(v) => setState(v as typeof state)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
+        <Select label="담당자" tone="filter" value={assignee} onChange={setAssignee} options={[["ALL", "전체 담당자"], ...data.members.map((m) => [m.id, m.name] as [string, string])]} />
+      </FilterShell>
+      <form className="create-card" onSubmit={createNode}>
+        <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Work Graph 노드 이름" />
+        <Select label="상위" value={parentId ?? ""} onChange={(value) => setParentId(value || null)} options={[["", "상위 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
+        <Select label="템플릿" value={templateId} onChange={setTemplateId} options={[["", "자유 노드"], ...data.templates.filter((template) => template.enabled).map((template) => [template.id, template.name] as [string, string])]} />
+        <button className="button primary" disabled={!title.trim()}>형상화</button>
+      </form>
       <div className="hierarchy-board">
         {(byParent.get(null) ?? []).map((task) => (
-          <TreeNode key={task.id} task={task} byParent={byParent} expanded={expanded} onToggle={toggle} level={0} />
+          <TreeNode key={task.id} task={task} templates={data.templates} byParent={byParent} expanded={expanded} onToggle={toggle} onReload={onReload} level={0} />
         ))}
       </div>
     </section>
@@ -287,18 +416,28 @@ function HierarchyView({ data }: { data: AppData }) {
 
 function TreeNode({
   task,
+  templates,
   byParent,
   expanded,
   onToggle,
+  onReload,
   level
 }: {
   task: TaskView;
+  templates: Template[];
   byParent: Map<string | null, TaskView[]>;
   expanded: Set<string>;
   onToggle: (id: string) => void;
+  onReload: () => Promise<void>;
   level: number;
 }) {
   const children = byParent.get(task.id) ?? [];
+  const [applyId, setApplyId] = useState(task.templateId ?? "");
+  const applySelectedTemplate = async () => {
+    if (!applyId) return;
+    await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ templateId: applyId }) });
+    await onReload();
+  };
   return (
     <div className="tree-node" style={{ marginLeft: level ? 24 : 0 }}>
       <div className="tree-card">
@@ -306,18 +445,21 @@ function TreeNode({
           {children.length ? (expanded.has(task.id) ? "−" : "+") : ""}
         </button>
         <button className="tree-main" onClick={() => go(`/tasks/${task.id}`)}>
-          <Badge tone={TEMPLATE_META[task.templateType].tone}>{TEMPLATE_META[task.templateType].label}</Badge>
+          <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+          <Badge tone={STRUCTURE_META[task.structureState].tone}>{STRUCTURE_META[task.structureState].label}</Badge>
           <span className="tree-title">{task.title}</span>
           <span className="tree-meta">
             노트 {task.activity.notesCount} · 스레드 {task.activity.commentsCount} · 파일 {task.activity.filesCount}
           </span>
         </button>
         <Badge tone={STATE_META[task.currentState].tone}>{STATE_META[task.currentState].label}</Badge>
+        <Select tone="inline" value={applyId} onChange={setApplyId} options={[["", "Template 적용"], ...templates.filter((template) => template.enabled).map((template) => [template.id, template.name] as [string, string])]} />
+        <button className="button secondary" disabled={!applyId || applyId === task.templateId} onClick={() => void applySelectedTemplate()}>정형화</button>
       </div>
       {expanded.has(task.id) && children.length > 0 && (
         <div className="tree-children">
           {children.map((child) => (
-            <TreeNode key={child.id} task={child} byParent={byParent} expanded={expanded} onToggle={onToggle} level={level + 1} />
+            <TreeNode key={child.id} task={child} templates={templates} byParent={byParent} expanded={expanded} onToggle={onToggle} onReload={onReload} level={level + 1} />
           ))}
         </div>
       )}
@@ -343,7 +485,7 @@ function DecisionGraphView({ data }: { data: AppData }) {
     tasks.forEach((task) => {
       const rows = map.get(task.parentId) ?? [];
       rows.push(task);
-      rows.sort((a, b) => templateOrder.indexOf(a.templateType) - templateOrder.indexOf(b.templateType));
+      rows.sort((a, b) => templateOrder.indexOf(a.templateType ?? "TASK") - templateOrder.indexOf(b.templateType ?? "TASK"));
       map.set(task.parentId, rows);
     });
     return map;
@@ -435,7 +577,7 @@ function DecisionGraphView({ data }: { data: AppData }) {
         action={<button className="button secondary" onClick={() => go("/hierarchy")}>계층 보기</button>}
       />
       <div className="toolbar graph-toolbar">
-        <Select value={focusId} onChange={setFocusId} options={[["ALL", "전체 그래프"], ...orderedTasks.map((task) => [task.id, task.title] as [string, string])]} />
+        <Select label="Focus" tone="filter" value={focusId} onChange={setFocusId} options={[["ALL", "전체 그래프"], ...orderedTasks.map((task) => [task.id, task.title] as [string, string])]} />
         <button className={`button ${layers.has("context") ? "primary" : "secondary"}`} onClick={() => toggleLayer("context")}>맥락</button>
         <button className={`button ${layers.has("decision") ? "primary" : "secondary"}`} onClick={() => toggleLayer("decision")}>결정</button>
         <button className={`button ${layers.has("refs") ? "primary" : "secondary"}`} onClick={() => toggleLayer("refs")}>#참조</button>
@@ -484,9 +626,9 @@ function DecisionGraphView({ data }: { data: AppData }) {
               const comments = commentCounts.get(task.id) ?? 0;
               const decisions = decisionCounts.get(task.id) ?? 0;
               return (
-                <g key={task.id} className={`graph-node graph-node-${task.templateType.toLowerCase()} ${task.id === focusId ? "focused" : ""}`} onClick={() => go(`/tasks/${task.id}`)} tabIndex={0} role="button">
+                <g key={task.id} className={`graph-node graph-node-${(task.templateType ?? "task").toLowerCase()} ${task.structureState === "FREEFORM" ? "graph-node-freeform" : ""} ${task.id === focusId ? "focused" : ""}`} onClick={() => go(`/tasks/${task.id}`)} tabIndex={0} role="button">
                   <rect x={pos.x} y={pos.y} width={pos.width} height={pos.height} rx="8" />
-                  <text x={pos.x + 12} y={pos.y + 19} className="graph-node-type">{TEMPLATE_META[task.templateType].label}</text>
+                  <text x={pos.x + 12} y={pos.y + 19} className="graph-node-type">{templateLabel(task.templateType)} · {STRUCTURE_META[task.structureState].label}</text>
                   <text x={pos.x + 12} y={pos.y + 38} className="graph-node-title">{shortText(task.title, 25)}</text>
                   {layers.has("context") && (
                     <>
@@ -537,8 +679,9 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
   const [decision, setDecision] = useState<{ toState: TaskState; decisionType: DecisionType; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [editingTask, setEditingTask] = useState(false);
   const [taskDraft, setTaskDraft] = useState({ title: "", description: "" });
+  const [autoSaving, setAutoSaving] = useState(false);
+  const loadedTaskId = useRef<string | null>(null);
 
   const load = async () => {
     setDetail(await request<TaskDetail>(`/api/tasks/${taskId}`));
@@ -551,32 +694,44 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
   useEffect(() => {
     if (!detail) return;
     setTaskDraft({ title: detail.task.title, description: detail.task.description });
+    loadedTaskId.current = detail.task.id;
   }, [detail?.task.description, detail?.task.id, detail?.task.title]);
 
-  if (!detail) return <Centered><div className="loader" /></Centered>;
+  const task = detail?.task;
 
-	  const { task, parent, notes, referenceableNotes = notes, comments, timeline, members, children } = detail;
+  const saveTask = async (nextDraft = taskDraft, quiet = false) => {
+    if (!nextDraft.title.trim() || !detail || !task) return;
+    if (nextDraft.title === detail.task.title && nextDraft.description === detail.task.description) return;
+    try {
+      if (quiet) setAutoSaving(true);
+      else setBusy(true);
+      setActionError(null);
+      await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(nextDraft) });
+      await Promise.all([load(), onReload()]);
+    } catch (err) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("태스크 저장 실패", "변경사항이 반영되지 않았습니다", "입력값과 권한을 확인한 뒤 다시 저장하세요")
+      );
+    } finally {
+      if (quiet) setAutoSaving(false);
+      else setBusy(false);
+    }
+  };
+
+  useDebouncedEffect(() => {
+    if (!detail || loadedTaskId.current !== detail.task.id) return;
+    if (taskDraft.title === detail.task.title && taskDraft.description === detail.task.description) return;
+    void saveTask(taskDraft, true);
+  }, [taskDraft.title, taskDraft.description, detail?.task.id], 1100);
+
+  if (!detail || !task) return <Centered><div className="loader" /></Centered>;
+
+	  const { parent, notes, referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children } = detail;
   const changed = hasChangedSinceSeen(task, parent, me.id);
   const canApprove = ["APPROVER", "ADMIN"].includes(me.role);
   const canDeleteTask = me.role === "ADMIN" || task.ownerId === me.id;
-
-  const saveTask = async () => {
-    if (!taskDraft.title.trim()) {
-      setActionError("태스크 제목은 비워둘 수 없습니다.");
-      return;
-    }
-    try {
-      setBusy(true);
-      setActionError(null);
-      await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(taskDraft) });
-      setEditingTask(false);
-      await Promise.all([load(), onReload()]);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : "태스크 저장 실패. 입력값과 권한을 확인하세요.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const deleteTask = async () => {
     if (!canDeleteTask || !window.confirm("이 태스크와 하위 태스크, 노트, 스레드, 타임라인을 삭제할까요?")) return;
@@ -587,7 +742,11 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
       await onReload();
       go("/tasks");
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "태스크 삭제 실패. 권한과 하위 구조를 확인하세요.");
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("태스크 삭제 실패", "대상 태스크가 그대로 유지됩니다", "권한과 하위 구조를 확인한 뒤 다시 시도하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -601,7 +760,11 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
       await Promise.all([load(), onReload()]);
       setDecision(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "처리 실패. 다시 시도하세요.");
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("상태 전이 처리 실패", "상태와 타임라인이 변경되지 않았습니다", "사유와 참조 노트를 확인한 뒤 다시 시도하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -612,26 +775,33 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
       <div className="task-heading">
         <button className="back-link" onClick={() => go("/hierarchy")}>계층으로 돌아가기</button>
         <div className="task-title-row">
-          <Badge tone={TEMPLATE_META[task.templateType].tone}>{TEMPLATE_META[task.templateType].label}</Badge>
-          <h1>{task.title}</h1>
+          <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+          <Badge tone={STRUCTURE_META[task.structureState].tone}>{STRUCTURE_META[task.structureState].label}</Badge>
+          <input
+            className="task-title-input"
+            value={taskDraft.title}
+            maxLength={120}
+            onChange={(event) => setTaskDraft((prev) => ({ ...prev, title: event.target.value }))}
+            onBlur={() => void saveTask(taskDraft, true)}
+            aria-label="태스크 제목"
+          />
           <Badge tone={STATE_META[task.currentState].tone}>{STATE_META[task.currentState].label}</Badge>
           <div className="task-heading-actions">
-            <button className="button secondary" disabled={busy} onClick={() => setEditingTask((value) => !value)}>{editingTask ? "닫기" : "수정"}</button>
+            {autoSaving && <span className="save-indicator">자동저장 중</span>}
+            {actionError && <button className="button secondary" onClick={() => setTaskDraft({ title: task.title, description: task.description })}>되돌리기</button>}
             <button className="button danger" disabled={busy || !canDeleteTask} title={canDeleteTask ? "태스크 삭제" : "소유자 또는 관리자만 삭제할 수 있습니다."} onClick={() => void deleteTask()}>삭제</button>
           </div>
         </div>
-        {editingTask ? (
-          <div className="task-editor">
-            <input value={taskDraft.title} maxLength={120} onChange={(event) => setTaskDraft((prev) => ({ ...prev, title: event.target.value }))} placeholder="태스크 제목" />
-            <textarea value={taskDraft.description} maxLength={1200} rows={3} onChange={(event) => setTaskDraft((prev) => ({ ...prev, description: event.target.value }))} placeholder="태스크 설명" />
-            <div className="row-actions">
-              <button className="button secondary" disabled={busy} onClick={() => setEditingTask(false)}>취소</button>
-              <button className="button primary" disabled={busy || !taskDraft.title.trim()} onClick={() => void saveTask()}>태스크 저장</button>
-            </div>
-          </div>
-        ) : (
-          <p className="task-description">{task.description || "설명이 아직 없습니다."}</p>
-        )}
+        <textarea
+          className="task-description-input"
+          value={taskDraft.description}
+          maxLength={1200}
+          rows={3}
+          onChange={(event) => setTaskDraft((prev) => ({ ...prev, description: event.target.value }))}
+          onBlur={() => void saveTask(taskDraft, true)}
+          placeholder="설명이 아직 없습니다."
+          aria-label="태스크 설명"
+        />
       </div>
 
       {changed && parent && (
@@ -648,10 +818,18 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
         <div className="main-column">
           <NotesSection taskId={task.id} notes={notes} members={members} onReload={load} />
           <FormOutput task={task} onReload={load} />
-	          <TimelinePanel timeline={timeline} notes={referenceableNotes} members={members} />
-	        </div>
-	
-	        <ThreadPanel taskId={task.id} notes={referenceableNotes} comments={comments} members={members} me={me} onReload={load} />
+        </div>
+
+        <TaskRightPanel
+          taskId={task.id}
+          notes={referenceableNotes}
+          tasks={referenceableTasks}
+          comments={comments}
+          members={members}
+          timeline={timeline}
+          me={me}
+          onReload={load}
+        />
       </div>
 
       <div className="decision-bar">
@@ -694,6 +872,46 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
   );
 }
 
+function TaskRightPanel({
+  taskId,
+  notes,
+  tasks,
+  comments,
+  members,
+  timeline,
+  me,
+  onReload
+}: {
+  taskId: string;
+  notes: Note[];
+  tasks: TaskView[];
+  comments: ThreadComment[];
+  members: Member[];
+  timeline: TimelineEvent[];
+  me: Member;
+  onReload: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<"thread" | "timeline">("thread");
+  return (
+    <aside className="task-right-panel">
+      <Tabs
+        variant="segmented"
+        value={tab}
+        onChange={(value) => setTab(value as typeof tab)}
+        tabs={[
+          { value: "thread", label: "스레드", count: comments.length },
+          { value: "timeline", label: "타임라인", count: timeline.length }
+        ]}
+      />
+      {tab === "thread" ? (
+        <ThreadPanel taskId={taskId} notes={notes} tasks={tasks} comments={comments} members={members} me={me} onReload={onReload} />
+      ) : (
+        <TimelinePanel timeline={timeline} notes={notes} members={members} />
+      )}
+    </aside>
+  );
+}
+
 function SystemFieldsPanel({
   task,
   members,
@@ -719,7 +937,11 @@ function SystemFieldsPanel({
       await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "시스템 필드 저장 실패. 권한과 입력값을 확인한 뒤 다시 시도하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("시스템 필드 저장 실패", "변경값이 반영되지 않았습니다", "권한과 입력값을 확인한 뒤 다시 시도하세요")
+      );
     } finally {
       setSaving(null);
     }
@@ -735,6 +957,7 @@ function SystemFieldsPanel({
       <Meta label="소유자">{task.owner.name}</Meta>
       <Meta label="우선순위">
         <Select
+          tone="inline"
           value={task.priority}
           onChange={(priority) => void patchTask("priority", { priority: priority as TaskView["priority"] })}
           options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
@@ -805,7 +1028,11 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
       setCreateOpen(false);
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "노트 생성 실패. 입력값을 확인한 뒤 다시 시도하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("노트 생성 실패", "새 노트가 추가되지 않았습니다", "노트 제목과 내용을 확인한 뒤 다시 생성하세요")
+      );
     } finally {
       setCreating(false);
     }
@@ -847,7 +1074,11 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
 	                await request(`/api/notes/${note.id}`, { method: "PATCH", body: JSON.stringify(patch) });
 	                await onReload();
 	              } catch (err) {
-	                setError(err instanceof Error ? err.message : "노트 저장 실패. 권한과 입력값을 확인하세요.");
+	                setError(
+                    err instanceof Error
+                      ? err.message
+                      : formatFailure("노트 저장 실패", "노트 수정사항이 반영되지 않았습니다", "권한과 입력값을 확인한 뒤 다시 저장하세요")
+                  );
 	              } finally {
 	                setCreating(false);
 	              }
@@ -860,7 +1091,11 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
 	                await request(`/api/notes/${note.id}`, { method: "DELETE" });
 	                await onReload();
 	              } catch (err) {
-	                setError(err instanceof Error ? err.message : "노트 삭제 실패. 권한과 대상 노트를 확인하세요.");
+	                setError(
+                    err instanceof Error
+                      ? err.message
+                      : formatFailure("노트 삭제 실패", "대상 노트가 그대로 유지됩니다", "권한과 대상 노트를 확인한 뒤 다시 삭제하세요")
+                  );
 	              } finally {
 	                setCreating(false);
 	              }
@@ -941,6 +1176,7 @@ function NoteCard({
 function ThreadPanel({
   taskId,
   notes,
+  tasks,
   comments,
   members,
   me,
@@ -948,6 +1184,7 @@ function ThreadPanel({
 }: {
   taskId: string;
   notes: Note[];
+  tasks: TaskView[];
   comments: ThreadComment[];
   members: Member[];
   me: Member;
@@ -955,9 +1192,11 @@ function ThreadPanel({
 }) {
   const [content, setContent] = useState("");
   const [refs, setRefs] = useState<Set<string>>(new Set());
+  const [mentions, setMentions] = useState<Mention[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
   const [editRefs, setEditRefs] = useState<Set<string>>(new Set());
+  const [editMentions, setEditMentions] = useState<Mention[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -968,13 +1207,18 @@ function ThreadPanel({
       setError(null);
       await request(`/api/tasks/${taskId}/comments`, {
         method: "POST",
-        body: JSON.stringify({ content, referencedNoteIds: [...refs] })
+        body: JSON.stringify({ content, referencedNoteIds: [...refs], mentions })
       });
       setContent("");
       setRefs(new Set());
+      setMentions([]);
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "스레드 작성 실패. 입력값과 참조 노트를 확인하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("스레드 작성 실패", "댓글이 등록되지 않았습니다", "입력 내용과 참조 노트를 확인한 뒤 다시 등록하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -984,6 +1228,7 @@ function ThreadPanel({
     setEditingId(comment.id);
     setEditContent(comment.content);
     setEditRefs(new Set(comment.referencedNoteIds));
+    setEditMentions(comment.mentions);
   };
 
   const saveEdit = async (commentId: string) => {
@@ -993,16 +1238,32 @@ function ThreadPanel({
       setError(null);
       await request(`/api/comments/${commentId}`, {
         method: "PATCH",
-        body: JSON.stringify({ content: editContent, referencedNoteIds: [...editRefs] })
+        body: JSON.stringify({ content: editContent, referencedNoteIds: [...editRefs], mentions: editMentions })
       });
       setEditingId(null);
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "스레드 수정 실패. 작성자 또는 관리자 권한이 필요합니다.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("스레드 수정 실패", "기존 댓글 내용이 유지됩니다", "작성자 또는 관리자 권한을 확인한 뒤 다시 수정하세요")
+      );
     } finally {
       setBusy(false);
     }
   };
+
+  const mentionOptions: Mention[] = [
+    ...members.map((member) => ({ id: `member-${member.id}`, type: "MEMBER" as const, targetId: member.id, label: member.name })),
+    ...tasks.map((task) => ({ id: `task-${task.id}`, type: "TASK" as const, targetId: task.id, label: task.title })),
+    ...tasks.flatMap((task) => (task.template?.formDefinition ?? []).map((field) => ({
+      id: `field-${task.id}-${field.key}`,
+      type: "FORM_FIELD" as const,
+      targetId: task.id,
+      fieldKey: field.key,
+      label: `${task.title}.${field.label}`
+    }))),
+  ];
 
   const deleteComment = async (commentId: string) => {
     if (!window.confirm("이 스레드 댓글을 삭제할까요?")) return;
@@ -1012,7 +1273,11 @@ function ThreadPanel({
       await request(`/api/comments/${commentId}`, { method: "DELETE" });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "스레드 삭제 실패. 작성자 또는 관리자 권한이 필요합니다.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("스레드 삭제 실패", "댓글이 그대로 유지됩니다", "작성자 또는 관리자 권한을 확인한 뒤 다시 삭제하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -1033,23 +1298,17 @@ function ThreadPanel({
               </div>
               {editingId === comment.id ? (
                 <>
-                  <textarea value={editContent} onChange={(event) => setEditContent(event.target.value)} rows={4} maxLength={2000} />
-                  <div className="ref-list selectable">
-                    {notes.map((note) => (
-                      <button
-                        key={note.id}
-                        className={editRefs.has(note.id) ? "selected" : ""}
-                        onClick={() => setEditRefs((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(note.id)) next.delete(note.id);
-                          else next.add(note.id);
-                          return next;
-                        })}
-                      >
-                        #{note.title}
-                      </button>
-                    ))}
-                  </div>
+                  <MentionComposer
+                    value={editContent}
+                    onChange={setEditContent}
+                    refs={editRefs}
+                    onRefsChange={setEditRefs}
+                    mentions={editMentions}
+                    onMentionsChange={setEditMentions}
+                    notes={notes}
+                    mentionOptions={mentionOptions}
+                    placeholder="댓글을 수정하세요. @ 또는 #으로 대상을 검색합니다."
+                  />
                   <div className="row-actions">
                     <button className="button secondary" disabled={busy} onClick={() => setEditingId(null)}>취소</button>
                     <button className="button primary" disabled={busy || !editContent.trim()} onClick={() => void saveEdit(comment.id)}>저장</button>
@@ -1061,6 +1320,11 @@ function ThreadPanel({
                   {comment.referencedNoteIds.length > 0 && (
                     <div className="ref-list">
                       {comment.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
+                    </div>
+                  )}
+                  {comment.mentions.length > 0 && (
+                    <div className="ref-list mention-list">
+                      {comment.mentions.map((mention) => <span key={mention.id}>{mention.type === "NOTE" ? "#" : "@"}{mention.label}</span>)}
                     </div>
                   )}
                   {canManage && (
@@ -1076,39 +1340,134 @@ function ThreadPanel({
         })}
       </div>
       <div className="composer">
-        <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="댓글을 작성하세요" />
-        <div className="ref-list selectable">
-          {notes.map((note) => (
-            <button
-              key={note.id}
-              className={refs.has(note.id) ? "selected" : ""}
-              onClick={() => setRefs((prev) => {
-                const next = new Set(prev);
-                if (next.has(note.id)) next.delete(note.id);
-                else next.add(note.id);
-                return next;
-              })}
-            >
-              #{note.title}
-            </button>
-          ))}
-        </div>
+        <MentionComposer
+          value={content}
+          onChange={setContent}
+          refs={refs}
+          onRefsChange={setRefs}
+          mentions={mentions}
+          onMentionsChange={setMentions}
+          notes={notes}
+          mentionOptions={mentionOptions}
+          placeholder="댓글을 작성하세요. @사람·노드·필드, #노트를 검색합니다."
+        />
         <button className="button primary full" disabled={busy || !content.trim()} onClick={() => void submit()}>댓글 작성</button>
       </div>
     </aside>
   );
 }
 
+function mentionKey(mention: Mention) {
+  return `${mention.type}-${mention.targetId}-${mention.fieldKey ?? ""}`;
+}
+
+function MentionComposer({
+  value,
+  onChange,
+  refs,
+  onRefsChange,
+  mentions,
+  onMentionsChange,
+  notes,
+  mentionOptions,
+  placeholder
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  refs: Set<string>;
+  onRefsChange: (refs: Set<string>) => void;
+  mentions: Mention[];
+  onMentionsChange: (mentions: Mention[]) => void;
+  notes: Note[];
+  mentionOptions: Mention[];
+  placeholder: string;
+}) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const command = value.match(/(^|\s)([@#])([^\s@#]*)$/);
+  const commandType = command?.[2] as "@" | "#" | undefined;
+  const query = command?.[3]?.toLowerCase() ?? "";
+  const noteOptions = notes
+    .filter((note) => note.title.toLowerCase().includes(query) || note.content.toLowerCase().includes(query))
+    .slice(0, 6);
+  const atOptions = mentionOptions
+    .filter((mention) => mention.label.toLowerCase().includes(query))
+    .slice(0, 6);
+  const selectedNotes = notes.filter((note) => refs.has(note.id));
+
+  const replaceCommand = (token: string) => {
+    const next = command ? `${value.slice(0, command.index ?? 0)}${command[1]}${token} ` : `${value}${token} `;
+    onChange(next);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const selectNote = (note: Note) => {
+    onRefsChange(new Set([...refs, note.id]));
+    replaceCommand(`#${note.title}`);
+  };
+
+  const selectMention = (mention: Mention) => {
+    if (!mentions.some((row) => mentionKey(row) === mentionKey(mention))) {
+      onMentionsChange([...mentions, mention]);
+    }
+    replaceCommand(`@${mention.label}`);
+  };
+
+  const removeNote = (noteId: string) => {
+    const next = new Set(refs);
+    next.delete(noteId);
+    onRefsChange(next);
+  };
+
+  const removeMention = (target: Mention) => {
+    onMentionsChange(mentions.filter((mention) => mentionKey(mention) !== mentionKey(target)));
+  };
+
+  return (
+    <div className="mention-composer">
+      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={2000} placeholder={placeholder} />
+      {commandType && (
+        <div className="mention-command-menu">
+          <div className="mention-command-head">
+            <strong>{commandType === "@" ? "대상 멘션" : "노트 참조"}</strong>
+            <span>{commandType}{query || "검색"}</span>
+          </div>
+          {commandType === "#"
+            ? noteOptions.map((note) => (
+              <button key={note.id} onClick={() => selectNote(note)}>
+                <strong>{note.title}</strong>
+                <small>{shortText(note.content, 56)}</small>
+              </button>
+            ))
+            : atOptions.map((mention) => (
+              <button key={mentionKey(mention)} onClick={() => selectMention(mention)}>
+                <strong>{mention.label}</strong>
+                <small>{mention.type === "MEMBER" ? "사람" : mention.type === "TASK" ? "결정 노드" : "Form 필드"}</small>
+              </button>
+            ))}
+          {((commandType === "#" && !noteOptions.length) || (commandType === "@" && !atOptions.length)) && <p className="muted">검색 결과가 없습니다.</p>}
+        </div>
+      )}
+      {(selectedNotes.length > 0 || mentions.length > 0) && (
+        <div className="selected-mentions">
+          {selectedNotes.map((note) => <button key={note.id} onClick={() => removeNote(note.id)}>#{note.title} ×</button>)}
+          {mentions.map((mention) => <button key={mentionKey(mention)} onClick={() => removeMention(mention)}>@{mention.label} ×</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promise<void> }) {
-  const entries = Object.entries(task.formValues);
+  const fields = task.template?.formDefinition ?? [];
+  const entries = fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues);
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => entries.length ? entries : [["", ""]]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextEntries = Object.entries(task.formValues);
+    const nextEntries = fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues);
     setRows(nextEntries.length ? nextEntries : [["", ""]]);
-  }, [task.formValues]);
+  }, [task.formValues, task.templateId]);
 
   const save = async () => {
     const next = Object.fromEntries(rows.filter(([key]) => key.trim()).map(([key, value]) => [key.trim(), value.trim()]));
@@ -1118,7 +1477,11 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
       setEditing(false);
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "양식 산출물 저장 실패. 입력값을 확인한 뒤 다시 시도하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("양식 산출물 저장 실패", "산출물 값이 반영되지 않았습니다", "입력값을 확인한 뒤 다시 저장하세요")
+      );
     }
   };
 
@@ -1130,26 +1493,40 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
       />
       {editing ? (
         <div className="form-output-editor">
-          {rows.map(([key, value], index) => (
+          {rows.map(([key, value], index) => {
+            const field = fields.find((row) => row.key === key);
+            return (
             <div className="form-output-row" key={`${key}-${index}`}>
               <input
                 value={key}
-                placeholder="필드"
+                placeholder={field?.label ?? "필드"}
                 maxLength={80}
+                readOnly={Boolean(field)}
                 onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}
               />
-              <input
-                value={value}
-                placeholder="값"
-                maxLength={1000}
-                onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
-              />
-              <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>
+              {field?.type === "LONG_TEXT" ? (
+                <textarea
+                  value={value}
+                  placeholder={field.helpText ?? "값"}
+                  maxLength={1000}
+                  rows={3}
+                  onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                />
+              ) : (
+                <input
+                  value={value}
+                  placeholder={field?.helpText ?? "값"}
+                  maxLength={1000}
+                  onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                />
+              )}
+              {!field && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
             </div>
-          ))}
+          );
+          })}
           {error && <p className="form-error">{error}</p>}
           <div className="row-actions">
-            <button className="button secondary" onClick={() => setRows((prev) => [...prev, ["", ""]])}>필드 추가</button>
+            {!fields.length && <button className="button secondary" onClick={() => setRows((prev) => [...prev, ["", ""]])}>필드 추가</button>}
             <button className="button primary" onClick={() => void save()}>산출물 저장</button>
           </div>
         </div>
@@ -1157,40 +1534,93 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
         <div className="kv-grid">
           {entries.length ? entries.map(([key, value]) => (
             <div key={key}>
-              <small>{key}</small>
+              <small>{fields.find((field) => field.key === key)?.label ?? key}</small>
               <strong>{value}</strong>
             </div>
           )) : <p className="muted">입력된 양식 값이 없습니다</p>}
         </div>
       )}
+      {task.template?.inspectionCriteria.length ? (
+        <div className="criteria-list">
+          {task.template.inspectionCriteria.map((criterion) => <span key={criterion}>{criterion}</span>)}
+        </div>
+      ) : null}
     </section>
   );
 }
 
 function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]; notes: Note[]; members: Member[] }) {
+  const [openSessions, setOpenSessions] = useState<Set<string>>(new Set());
+  const sessions = useMemo(() => {
+    const rows: Array<{ id: string; representative: TimelineEvent; hidden: TimelineEvent[] }> = [];
+    timeline.forEach((event) => {
+      const minuteKey = new Date(event.createdAt).toISOString().slice(0, 16);
+      const previous = rows[rows.length - 1];
+      if (previous && new Date(previous.representative.createdAt).toISOString().slice(0, 16) === minuteKey && previous.representative.actorId === event.actorId) {
+        previous.hidden.push(event);
+      } else {
+        rows.push({ id: `${event.actorId}-${minuteKey}`, representative: event, hidden: [] });
+      }
+    });
+    return rows;
+  }, [timeline]);
+  const hiddenSessionIds = sessions.filter((session) => session.hidden.length > 0).map((session) => session.id);
+  const allOpen = hiddenSessionIds.length > 0 && hiddenSessionIds.every((id) => openSessions.has(id));
+  const renderEvent = (event: TimelineEvent) => (
+    <div className="timeline-item" key={event.id}>
+      <span className="timeline-dot" />
+      <div>
+        <strong>{eventLabel[event.type] ?? event.type}</strong>
+        <p>
+          {memberName(members, event.actorId)}
+          {event.decisionType ? ` · ${decisionLabel[event.decisionType]}` : ""}
+          {event.reason ? ` · ${event.reason}` : ""}
+        </p>
+        {event.referencedNoteIds.length > 0 && (
+          <div className="ref-list">
+            {event.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
+          </div>
+        )}
+      </div>
+      <time>{formatDate(event.createdAt)}</time>
+    </div>
+  );
+
   return (
     <section className="panel">
-      <PanelHeader title="타임라인" action={<button className="button secondary">전체</button>} />
+      <PanelHeader
+        title="타임라인"
+        action={hiddenSessionIds.length > 0 ? (
+          <button className="button secondary" onClick={() => setOpenSessions(allOpen ? new Set() : new Set(hiddenSessionIds))}>
+            {allOpen ? "접기" : "전체 펼침"}
+          </button>
+        ) : <button className="button secondary" disabled>전체</button>}
+      />
       <div className="timeline">
-        {timeline.map((event) => (
-          <div className="timeline-item" key={event.id}>
-            <span className="timeline-dot" />
-            <div>
-              <strong>{eventLabel[event.type] ?? event.type}</strong>
-              <p>
-                {memberName(members, event.actorId)}
-                {event.decisionType ? ` · ${decisionLabel[event.decisionType]}` : ""}
-                {event.reason ? ` · ${event.reason}` : ""}
-              </p>
-              {event.referencedNoteIds.length > 0 && (
-                <div className="ref-list">
-                  {event.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
-                </div>
+        {sessions.map((session) => {
+          const open = openSessions.has(session.id);
+          return (
+            <div className="timeline-session" key={session.id}>
+              {renderEvent(session.representative)}
+              {session.hidden.length > 0 && (
+                <>
+                  <button
+                    className="show-more"
+                    onClick={() => setOpenSessions((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(session.id)) next.delete(session.id);
+                      else next.add(session.id);
+                      return next;
+                    })}
+                  >
+                    {open ? "Show less" : `Show ${session.hidden.length} more`}
+                  </button>
+                  {open && <div className="timeline-hidden">{session.hidden.map(renderEvent)}</div>}
+                </>
               )}
             </div>
-            <time>{formatDate(event.createdAt)}</time>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -1294,14 +1724,18 @@ function InboxView({ data, onReload }: { data: AppData; onReload: () => Promise<
   );
 }
 
-function TasksView({ tasks, members, onReload }: { tasks: TaskView[]; members: Member[]; onReload: () => Promise<void> }) {
+function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; members: Member[]; me: Member; onReload: () => Promise<void> }) {
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
   const [templateType, setTemplateType] = useState<TemplateType>("TASK");
   const [query, setQuery] = useState("");
   const [filterState, setFilterState] = useState<"ALL" | TaskState>("ALL");
   const [filterType, setFilterType] = useState<"ALL" | TemplateType>("ALL");
-  const [sortBy, setSortBy] = useState("updated");
+  const [sortBy, setSortBy] = useState("manual");
+  const [viewMode, setViewMode] = useState<"list" | "board" | "backlog" | "hierarchy" | "graph">("list");
+  const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee">("none");
+  const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">("all");
+  const meId = me.id;
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -1316,38 +1750,220 @@ function TasksView({ tasks, members, onReload }: { tasks: TaskView[]; members: M
     .filter((task) => !query || `${task.title} ${task.description}`.toLowerCase().includes(query.toLowerCase()))
     .filter((task) => filterState === "ALL" || task.currentState === filterState)
     .filter((task) => filterType === "ALL" || task.templateType === filterType)
+    .filter((task) => {
+      if (quickFilter === "all") return true;
+      if (quickFilter === "mine") return task.assigneeIds.includes(meId) || task.ownerId === meId;
+      if (quickFilter === "pending") return task.currentState === "PENDING_APPROVAL";
+      return isDueToday(task.dueDate);
+    })
     .sort((a, b) => {
+      if (sortBy === "manual") return 0;
       if (sortBy === "due") return String(a.dueDate ?? "9999").localeCompare(String(b.dueDate ?? "9999"));
       if (sortBy === "priority") return ["URGENT", "HIGH", "MEDIUM", "LOW"].indexOf(a.priority) - ["URGENT", "HIGH", "MEDIUM", "LOW"].indexOf(b.priority);
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
+  const dragDisabled = sortBy !== "manual" || groupBy !== "none";
+  const backlogTasks = filteredTasks.filter((task) => task.currentState === "DRAFT");
+  const sprintTasks = filteredTasks.filter((task) => task.currentState !== "DRAFT");
+  const opsMetrics = [
+    ["Scope", filteredTasks.length, `${tasks.length} total`],
+    ["Backlog", backlogTasks.length, "draft queue"],
+    ["Approval", filteredTasks.filter((task) => task.currentState === "PENDING_APPROVAL").length, "decision wait"],
+    ["Templated", filteredTasks.filter((task) => task.structureState === "TEMPLATED").length, "structured"],
+    ["Mentions", filteredTasks.reduce((sum, task) => sum + task.activity.commentsCount, 0), "thread load"],
+    ["Evidence", filteredTasks.reduce((sum, task) => sum + task.activity.notesCount + task.activity.filesCount, 0), "notes/files"]
+  ];
+
+  const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => {
+    await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
+    await onReload();
+  };
 
   return (
     <section className="page-stack">
       <PageHeader eyebrow="태스크" title="실행 관점 목록" action={<Badge tone="blue">{filteredTasks.length} / {tasks.length}</Badge>} />
-      <form className="create-card" onSubmit={create}>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
-        <Select value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
-        <Select value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "상위 항목 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
-        <button className="button primary">생성</button>
-      </form>
-      <div className="toolbar task-toolbar">
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
-        <Select value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
-        <Select value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
-        <Select value={sortBy} onChange={setSortBy} options={[["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
-      </div>
-      <div className="task-table">
-        {filteredTasks.map((task) => (
-          <button key={task.id} className="task-row" onClick={() => go(`/tasks/${task.id}`)}>
-            <Badge tone={TEMPLATE_META[task.templateType].tone}>{TEMPLATE_META[task.templateType].label}</Badge>
-            <strong>{task.title}</strong>
-            <span>{task.assigneeIds.map((id) => memberName(members, id)).join(", ")}</span>
-            <Badge tone={STATE_META[task.currentState].tone}>{STATE_META[task.currentState].label}</Badge>
-          </button>
+      <div className="ops-strip">
+        {opsMetrics.map(([label, value, caption]) => (
+          <article className="ops-cell" key={label}>
+            <small>{label}</small>
+            <strong>{value}</strong>
+            <span>{caption}</span>
+          </article>
         ))}
       </div>
+      <Tabs
+        variant="segmented"
+        value={viewMode}
+        onChange={(value) => {
+          const next = value as typeof viewMode;
+          setViewMode(next);
+          if (next === "hierarchy") go("/hierarchy");
+          if (next === "graph") go("/graph");
+        }}
+        tabs={[
+          { value: "list", label: "List", count: filteredTasks.length },
+          { value: "board", label: "Board" },
+          { value: "backlog", label: "Backlog", count: backlogTasks.length },
+          { value: "hierarchy", label: "계층" },
+          { value: "graph", label: "결정그래프" }
+        ]}
+      />
+      <Tabs
+        variant="segmented"
+        value={quickFilter}
+        onChange={(value) => setQuickFilter(value as typeof quickFilter)}
+        tabs={[
+          { value: "all", label: "전체", count: tasks.length },
+          { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
+          { value: "pending", label: "승인대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
+          { value: "due-today", label: "오늘기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
+        ]}
+      />
+      <form className="create-card" onSubmit={create}>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
+        <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
+        <Select label="상위" value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "상위 항목 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
+        <button className="button primary">생성</button>
+      </form>
+      <FilterShell
+        meta={<span>{filteredTasks.length} visible · sort {sortBy} · group {groupBy}</span>}
+        action={<button className="button secondary" onClick={() => { setQuery(""); setFilterState("ALL"); setFilterType("ALL"); setSortBy("manual"); setGroupBy("none"); setQuickFilter("all"); }}>필터 초기화</button>}
+      >
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
+        <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
+        <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
+        <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
+        <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"]]} />
+      </FilterShell>
+      {dragDisabled && (
+        <div className="sort-banner">
+          <strong>정렬/그룹 중</strong>
+          <span>수동 순서 이동은 Sort와 Group이 모두 꺼져 있을 때 활성화됩니다.</span>
+          <button className="button secondary" onClick={() => { setSortBy("manual"); setGroupBy("none"); }}>Clear sort/group</button>
+        </div>
+      )}
+      {viewMode === "board" ? (
+        <TaskBoardView tasks={filteredTasks} members={members} onPatch={patchTask} />
+      ) : viewMode === "backlog" ? (
+        <div className="backlog-layout">
+          <TaskListPanel title="Backlog" tasks={backlogTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          <TaskListPanel title="Current Sprint" tasks={sprintTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+        </div>
+      ) : groupBy === "state" ? (
+        <div className="grouped-list">
+          {states.filter((state): state is TaskState => state !== "ALL").map((state) => (
+            <TaskListPanel key={state} title={STATE_META[state].label} tasks={filteredTasks.filter((task) => task.currentState === state)} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          ))}
+        </div>
+      ) : groupBy === "assignee" ? (
+        <div className="grouped-list">
+          {members.map((member) => (
+            <TaskListPanel key={member.id} title={member.name} tasks={filteredTasks.filter((task) => task.assigneeIds.includes(member.id))} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          ))}
+        </div>
+      ) : (
+        <TaskListPanel title="All Tasks" tasks={filteredTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+      )}
     </section>
+  );
+}
+
+function TaskListPanel({
+  title,
+  tasks,
+  members,
+  dragDisabled,
+  onPatch
+}: {
+  title: string;
+  tasks: TaskView[];
+  members: Member[];
+  dragDisabled: boolean;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
+}) {
+  return (
+    <section className="task-list-panel">
+      <div className="task-list-head">
+        <strong>{title}</strong>
+        <span>{tasks.length}</span>
+      </div>
+      <div className="task-table">
+        <div className="task-row rich-row table-head">
+          <span />
+          <span>Decision object</span>
+          <span>Owner / signal</span>
+          <span>Status</span>
+          <span>Priority</span>
+        </div>
+        {tasks.map((task) => (
+          <div key={task.id} className={`task-row rich-row priority-${task.priority.toLowerCase()}`}>
+            <button className={`drag-handle ${dragDisabled ? "disabled" : ""}`} title={dragDisabled ? "정렬 또는 그룹 중에는 순서 이동이 비활성화됩니다." : "수동 순서 이동"}>⠿</button>
+            <button className="task-open-cell" onClick={() => go(`/tasks/${task.id}`)}>
+              <span className="object-main">
+                <strong>{task.title}</strong>
+                <small>{task.parentId ? "parent linked" : "root"} · {STRUCTURE_META[task.structureState].label}</small>
+              </span>
+              <span className="object-tags">
+                <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+                <span className="signal-chip">N{task.activity.notesCount}</span>
+                <span className="signal-chip">T{task.activity.commentsCount}</span>
+              </span>
+            </button>
+            <span className="owner-cell">
+              <strong>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</strong>
+              <small>signal {densitySignal(task)}</small>
+            </span>
+            <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])} />
+            <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
+          </div>
+        ))}
+        {!tasks.length && <div className="empty-row">표시할 태스크가 없습니다.</div>}
+      </div>
+    </section>
+  );
+}
+
+function TaskBoardView({
+  tasks,
+  members,
+  onPatch
+}: {
+  tasks: TaskView[];
+  members: Member[];
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
+}) {
+  return (
+    <div className="board-view">
+      {states.filter((state): state is TaskState => state !== "ALL").map((state) => {
+        const rows = tasks.filter((task) => task.currentState === state);
+        return (
+          <section className="board-column" key={state}>
+            <div className="board-column-head">
+              <Badge tone={STATE_META[state].tone}>{STATE_META[state].label}</Badge>
+              <span>{rows.length}</span>
+            </div>
+            <div className="board-card-stack">
+              {rows.map((task) => (
+                <article className={`board-card priority-${task.priority.toLowerCase()}`} key={task.id}>
+                  <button className="board-card-title" onClick={() => go(`/tasks/${task.id}`)}>{task.title}</button>
+                  <div className="board-card-meta">
+                    <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+                    <span>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</span>
+                  </div>
+                  <div className="card-signal-row">
+                    <span>notes {task.activity.notesCount}</span>
+                    <span>threads {task.activity.commentsCount}</span>
+                    <span>{STRUCTURE_META[task.structureState].label}</span>
+                  </div>
+                  <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((row): row is TaskState => row !== "ALL").map((row) => [row, `${STATE_META[row].label}로 이동`])} />
+                </article>
+              ))}
+              <button className="board-add" onClick={() => go("/hierarchy")}>+ Add task</button>
+            </div>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1368,7 +1984,11 @@ function TemplatesView({ templates, onReload }: { templates: Template[]; onReloa
       setName("");
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "템플릿 생성 실패. 권한과 입력값을 확인하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("템플릿 생성 실패", "새 템플릿이 추가되지 않았습니다", "권한과 입력값을 확인한 뒤 다시 생성하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -1379,7 +1999,7 @@ function TemplatesView({ templates, onReload }: { templates: Template[]; onReloa
       <PageHeader eyebrow="템플릿" title="방법론 자산" />
       <form className="create-card template-create" onSubmit={createTemplate}>
         <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="템플릿 이름" />
-        <Select value={type} onChange={(value) => setType(value as TemplateType)} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
+        <Select label="유형" value={type} onChange={(value) => setType(value as TemplateType)} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
         <label className="toggle-row">
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
           활성화
@@ -1415,7 +2035,11 @@ function TemplateCard({ template, onReload }: { template: Template; onReload: ()
       setEditing(false);
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "템플릿 저장 실패. 편집자 이상 권한이 필요합니다.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("템플릿 저장 실패", "템플릿 변경사항이 반영되지 않았습니다", "편집자 이상 권한과 입력값을 확인한 뒤 다시 저장하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -1429,7 +2053,11 @@ function TemplateCard({ template, onReload }: { template: Template; onReload: ()
       await request(`/api/templates/${template.id}`, { method: "DELETE" });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "템플릿 삭제 실패. 관리자 권한 또는 대상 상태를 확인하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("템플릿 삭제 실패", "템플릿이 그대로 유지됩니다", "관리자 권한과 대상 상태를 확인한 뒤 다시 삭제하세요")
+      );
     } finally {
       setBusy(false);
     }
@@ -1445,7 +2073,7 @@ function TemplateCard({ template, onReload }: { template: Template; onReload: ()
       {editing ? (
         <div className="template-editor">
           <input value={draft.name} maxLength={120} onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))} />
-          <Select value={draft.type} onChange={(value) => setDraft((prev) => ({ ...prev, type: value as TemplateType }))} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
+          <Select label="유형" value={draft.type} onChange={(value) => setDraft((prev) => ({ ...prev, type: value as TemplateType }))} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
           <label className="toggle-row">
             <input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft((prev) => ({ ...prev, enabled: event.target.checked }))} />
             활성화
@@ -1500,7 +2128,11 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
       await request(`/api/admin/members/${memberId}`, { method: "PATCH", body: JSON.stringify({ role: nextRole }) });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "역할 변경 실패. 권한과 대상 멤버를 확인하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("역할 변경 실패", "멤버 역할이 변경되지 않았습니다", "권한과 대상 멤버 상태를 확인한 뒤 다시 시도하세요")
+      );
     }
   };
 
@@ -1511,7 +2143,11 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
       await request(`/api/admin/members/${member.id}`, { method: "DELETE" });
       await onReload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "멤버 제거 실패. 관리자 권한 또는 대상 멤버를 확인하세요.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("멤버 제거 실패", "멤버가 그대로 유지됩니다", "관리자 권한과 대상 멤버 상태를 확인한 뒤 다시 시도하세요")
+      );
     }
   };
 
@@ -1520,7 +2156,7 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
       <PageHeader eyebrow="관리" title="멤버와 역할" />
       <form className="create-card" onSubmit={invite}>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="member@company.com" />
-        <Select value={role} onChange={(v) => setRole(v as Role)} options={["VIEWER", "EDITOR", "APPROVER", "ADMIN"].map((v) => [v, roleLabel[v as Role]])} />
+        <Select label="역할" value={role} onChange={(v) => setRole(v as Role)} options={["VIEWER", "EDITOR", "APPROVER", "ADMIN"].map((v) => [v, roleLabel[v as Role]])} />
         <button className="button primary">초대</button>
       </form>
       {inviteUrl && <div className="change-banner"><strong>초대 URL</strong><span>{inviteUrl}</span></div>}
@@ -1533,6 +2169,7 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
 	            <span>{member.email}</span>
 	            <div className="row-actions">
 	              <Select
+                  tone="inline"
 	                value={member.role}
 	                onChange={(nextRole) => void changeRole(member.id, nextRole as Role)}
 		                options={["VIEWER", "EDITOR", "APPROVER", "ADMIN"].map((v) => [v, roleLabel[v as Role]])}
@@ -1547,18 +2184,41 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
 }
 
 function AnalyticsView({ analytics }: { analytics: Analytics }) {
+  const headline = [
+    ["Unmet Needs", analytics.shapedNodeCount > 0 && analytics.mentionThreadCount > 0 ? "YES" : "WATCH", "object clarity"],
+    ["Retention", analytics.voluntaryVisitsPerWeek > 0 ? "YES" : "WATCH", `${analytics.voluntaryVisitsPerWeek}/week`],
+    ["Loop Quality", pct(analytics.feedbackNodeRevisionRate), "feedback revision"],
+    ["Decision Flow", String(analytics.decisionEvents), "events"]
+  ];
+  const rows = [
+    ["형상화", "Work Graph에 결정 대상이 존재하는가", analytics.shapedNodeCount, "노드 수"],
+    ["관계", "Objective→KR→Task 연결이 이어지는가", analytics.relationCount, "edge 수"],
+    ["정형화", "Template 적용으로 산출물 구조가 생겼는가", analytics.templatedNodeCount, "template node"],
+    ["Form", "Template Form Output이 활성화됐는가", analytics.activeFormFieldCount, "field 수"],
+    ["멘션", "대상을 가리켜 논의가 시작됐는가", analytics.mentionCount, "mention 수"],
+    ["Thread", "멘션 기반 스레드가 만들어졌는가", analytics.mentionThreadCount, "thread 수"],
+    ["Cross-Fn", "비개발/개발이 같은 노드를 보고 있는가", pct(analytics.crossFunctionalThreadRate), "rate"],
+    ["Revision", "피드백 이후 구조가 다시 바뀌는가", pct(analytics.feedbackNodeRevisionRate), "rate"]
+  ];
   const cards = [
-    ["주간 재방문", `${Math.round(analytics.weeklyReturnRate * 100)}%`],
-    ["노트 : 스레드", analytics.notesThreadBalance],
-    ["비개발 편집", `${Math.round(analytics.nonDevContributionRate * 100)}%`],
-    ["#참조율", `${Math.round(analytics.noteReferenceRate * 100)}%`],
-    ["자발 방문", `${analytics.voluntaryVisitsPerWeek}/주`],
-    ["결정 이벤트", String(analytics.decisionEvents)]
+    ["주간 재방문", pct(analytics.weeklyReturnRate), "자발 루프"],
+    ["노트 : 스레드", analytics.notesThreadBalance, "근거/논의 균형"],
+    ["비개발 편집", pct(analytics.nonDevContributionRate), "cross function"],
+    ["#참조율", pct(analytics.noteReferenceRate), "evidence link"]
   ];
   return (
     <section className="page-stack">
-      <PageHeader eyebrow="분석" title="파일럿 판정 대시보드" />
-      <div className="metric-grid">
+      <PageHeader eyebrow="분석" title="Objective 1 판정 대시보드" />
+      <div className="analytics-hero">
+        {headline.map(([label, value, caption]) => (
+          <article className="hero-metric" key={label}>
+            <small>{label}</small>
+            <strong>{value}</strong>
+            <span>{caption}</span>
+          </article>
+        ))}
+      </div>
+      <div className="metric-grid compact">
         {cards.map(([label, value]) => (
           <article className="metric-card" key={label}>
             <small>{label}</small>
@@ -1566,6 +2226,22 @@ function AnalyticsView({ analytics }: { analytics: Analytics }) {
           </article>
         ))}
       </div>
+      <section className="analytics-table">
+        <div className="analytics-row analytics-head">
+          <span>KR 1.1 Index</span>
+          <span>판정 질문</span>
+          <span>Value</span>
+          <span>Unit</span>
+        </div>
+        {rows.map(([label, question, value, unit]) => (
+          <div className="analytics-row" key={label}>
+            <strong>{label}</strong>
+            <span>{question}</span>
+            <b>{value}</b>
+            <small>{unit}</small>
+          </div>
+        ))}
+      </section>
     </section>
   );
 }
