@@ -1,11 +1,26 @@
 import type { ReactNode } from "react";
 
-export function PageHeader({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) {
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  meta,
+  action
+}: {
+  eyebrow: string;
+  title: string;
+  description?: ReactNode;
+  meta?: ReactNode;
+  action?: ReactNode;
+}) {
   return (
     <div className="page-header">
       <div>
+        <div className="eyebrow">{eyebrow}</div>
         <h1>{title}</h1>
+        {description && <p className="page-description">{description}</p>}
       </div>
+      {meta && <div className="page-header-meta">{meta}</div>}
       {action}
     </div>
   );
@@ -46,7 +61,7 @@ export function Tabs({
   value: string;
   onChange: (v: string) => void;
   tabs: Array<{ value: string; label: string; count?: number }>;
-  variant?: "default" | "segmented";
+  variant?: "default" | "segmented" | "primary" | "panel" | "chips";
 }) {
   return (
     <div className={`tabs tabs-${variant}`} role="tablist">
