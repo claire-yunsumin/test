@@ -2117,7 +2117,7 @@ main {
 
 .form-output-row {
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.5fr) auto;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 

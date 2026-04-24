@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import type { Member, Role } from "@hwe/shared";
+import type { Member, Mention, Role } from "@hwe/shared";
+import type { Task } from "@hwe/shared";
 import { byId, data } from "../domain/store.js";
 
 declare global {
@@ -46,6 +47,15 @@ export function requireRole(req: Request, res: Response, required: Role) {
   return true;
 }
 
+export function canEditTask(user: Member) {
+  return isRoleAtLeast(user.role, "EDITOR");
+}
+
+export function canEditForm(user: Member, task: Task) {
+  if (user.role === "ADMIN") return true;
+  return task.ownerId === user.id || task.assigneeIds.includes(user.id);
+}
+
 export function visibleTaskIdsFor(user: Member) {
   if (user.role === "ADMIN") return new Set(data.tasks.map((task) => task.id));
   return new Set(
@@ -88,4 +98,20 @@ export function validateNoteRefs(user: Member, noteIds: string[]) {
   const visibleTaskIds = visibleTaskIdsFor(user);
   const allowed = new Set(data.notes.filter((note) => visibleTaskIds.has(note.taskId)).map((note) => note.id));
   return noteIds.every((id) => allowed.has(id));
+}
+
+export function validateMentions(user: Member, mentions: Mention[]) {
+  const visibleTaskIds = visibleTaskIdsFor(user);
+  const memberIds = new Set(data.members.map((member) => member.id));
+  const noteIds = new Set(data.notes.filter((note) => visibleTaskIds.has(note.taskId)).map((note) => note.id));
+
+  return mentions.every((mention) => {
+    if (mention.type === "MEMBER") return memberIds.has(mention.targetId);
+    if (mention.type === "NOTE") return noteIds.has(mention.targetId);
+    const task = byId(data.tasks, mention.targetId);
+    if (!task || !visibleTaskIds.has(task.id)) return false;
+    if (mention.type === "TASK") return true;
+    if (mention.type === "FORM_FIELD") return Boolean(mention.fieldKey && Object.prototype.hasOwnProperty.call(task.formValues, mention.fieldKey));
+    return false;
+  });
 }

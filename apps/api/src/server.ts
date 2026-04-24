@@ -3,18 +3,69 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
   type DecisionType,
+  type Mention,
   type Note,
   type Task,
   type TaskState,
   type Template,
   type ThreadComment
 } from "@hwe/shared";
-import { meId, authenticate, getVisibleTask, requireRole, validateMembers, validateNoteRefs, visibleTaskIdsFor } from "./http/access.js";
+import { meId, authenticate, canEditForm, canEditTask, getVisibleTask, requireRole, validateMembers, validateMentions, validateNoteRefs, visibleTaskIdsFor } from "./http/access.js";
 import { applySecurity, rateLimit } from "./http/security.js";
 import { optionalText, text } from "./http/validation.js";
-import { addInbox, addTimeline, byId, componentForEvent, data, now, serializeTask } from "./domain/store.js";
+import { addEngagement, addInbox, addTimeline, applyTemplate, byId, calculateAnalytics, componentForEvent, data, now, serializeTask } from "./domain/store.js";
 
 const port = Number(process.env.PORT ?? 4000);
+const templateTypes = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"] as const;
+const mentionSchema = z.object({
+  type: z.enum(["MEMBER", "TASK", "FORM_FIELD", "NOTE"]),
+  targetId: z.string(),
+  label: text(1, 160),
+  fieldKey: z.string().max(80).optional()
+});
+
+function normalizeMentions(mentions: Array<z.infer<typeof mentionSchema>>): Mention[] {
+  return mentions.map((mention) => ({
+    id: `mention-${crypto.randomUUID()}`,
+    type: mention.type,
+    targetId: mention.targetId,
+    label: mention.label,
+    fieldKey: mention.fieldKey
+  }));
+}
+
+function noteRefsFromMentions(noteIds: string[], mentions: Mention[]) {
+  return [...new Set([...noteIds, ...mentions.filter((mention) => mention.type === "NOTE").map((mention) => mention.targetId)])];
+}
+
+function notifyMentions(req: express.Request, task: Task, mentions: Mention[]) {
+  const recipients = new Set<string>();
+  mentions.forEach((mention) => {
+    if (mention.type === "MEMBER") recipients.add(mention.targetId);
+    if (mention.type === "TASK" || mention.type === "FORM_FIELD") {
+      const target = byId(data.tasks, mention.targetId);
+      if (target) [...target.assigneeIds, ...target.watcherIds, target.ownerId].forEach((id) => recipients.add(id));
+    }
+    if (mention.type === "NOTE") {
+      const note = byId(data.notes, mention.targetId);
+      const target = note ? byId(data.tasks, note.taskId) : null;
+      if (target) [...target.assigneeIds, ...target.watcherIds, target.ownerId].forEach((id) => recipients.add(id));
+    }
+  });
+  recipients.delete(meId(req));
+  recipients.forEach((userId) => addInbox({
+    userId,
+    taskId: task.id,
+    componentType: "DISCUSSION",
+    eventType: "MENTION",
+    title: "멘션된 논의",
+    message: `${req.user!.name}: ${mentions.map((mention) => `@${mention.label}`).join(", ")}`
+  }));
+}
+
+function referencingCommentExists(noteId: string) {
+  return data.comments.some((comment) => comment.referencedNoteIds.includes(noteId) || comment.mentions.some((mention) => mention.type === "NOTE" && mention.targetId === noteId));
+}
 
 export function createApp() {
 const app = express();
@@ -31,6 +82,7 @@ app.get("/api/bootstrap", (req, res) => {
   const visibleIds = visibleTaskIdsFor(user);
   const tasks = data.tasks.filter((task) => visibleIds.has(task.id));
   const taskIds = new Set(tasks.map((task) => task.id));
+  data.analytics = calculateAnalytics();
   res.json({
     ...data,
     me: user,
@@ -85,19 +137,27 @@ app.post("/api/tasks", (req, res) => {
     .object({
       title: text(1, 120),
       parentId: z.string().nullable().optional(),
-      templateType: z.enum(["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"]).default("TASK")
+      templateId: z.string().nullable().optional(),
+      templateType: z.enum(templateTypes).nullable().optional(),
+      structureState: z.enum(["FREEFORM", "TEMPLATED"]).default("FREEFORM")
     })
     .parse(req.body);
 
   if (body.parentId && !getVisibleTask(req, res, body.parentId)) return;
+  const template = body.templateId ? byId(data.templates, body.templateId) : null;
+  if (body.templateId && !template) {
+    res.status(400).json({ error: "INVALID_TEMPLATE", requestId: req.requestId });
+    return;
+  }
 
   const task: Task = {
     id: `task-${crypto.randomUUID()}`,
     parentId: body.parentId ?? null,
     title: body.title,
     description: "",
-    templateType: body.templateType,
-    templateId: body.templateType === "TASK" ? "tpl-task" : "tpl-okr",
+    structureState: template || body.structureState === "TEMPLATED" ? "TEMPLATED" : "FREEFORM",
+    templateType: template?.type ?? body.templateType ?? null,
+    templateId: template?.id ?? null,
     currentState: "DRAFT",
     priority: "MEDIUM",
     ownerId: meId(req),
@@ -107,10 +167,12 @@ app.post("/api/tasks", (req, res) => {
     lastSeenAtByUser: {},
     updatedAt: now(),
     createdAt: now(),
-    formValues: {}
+    formValues: template ? Object.fromEntries(template.formDefinition.map((field) => [field.key, ""])) : {}
   };
 
   data.tasks.unshift(task);
+  addEngagement({ type: "NODE_CREATED", actorId: meId(req), taskId: task.id, metadata: { structureState: task.structureState } });
+  if (template) addEngagement({ type: "TEMPLATE_APPLIED", actorId: meId(req), taskId: task.id, targetId: template.id, metadata: { fields: template.formDefinition.length } });
   addTimeline({
     taskId: task.id,
     type: "TASK_CREATED",
@@ -128,21 +190,26 @@ app.get("/api/tasks/:taskId", (req, res) => {
   if (!task) return;
 
 	  task.lastSeenAtByUser[meId(req)] = now();
+    addEngagement({ type: "VOLUNTARY_VISIT", actorId: meId(req), taskId: task.id, metadata: { source: "task-detail" } });
 	  const visibleIds = visibleTaskIdsFor(req.user!);
 	  res.json({
 	    task: serializeTask(task),
 	    parent: task.parentId ? serializeTask(byId(data.tasks, task.parentId)!) : null,
 	    children: data.tasks.filter((row) => row.parentId === task.id).map(serializeTask),
+      referenceableTasks: data.tasks.filter((row) => visibleIds.has(row.id)).map(serializeTask),
 	    notes: data.notes.filter((note) => note.taskId === task.id),
 	    referenceableNotes: data.notes.filter((note) => visibleIds.has(note.taskId)),
 	    comments: data.comments.filter((comment) => comment.taskId === task.id),
 	    timeline: data.timeline.filter((event) => event.taskId === task.id),
-	    members: data.members
+	    members: data.members,
+      permissions: {
+        canEditTask: canEditTask(req.user!),
+        canEditForm: canEditForm(req.user!, task)
+      }
   });
 });
 
 app.patch("/api/tasks/:taskId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
   const patch = z
@@ -150,12 +217,25 @@ app.patch("/api/tasks/:taskId", (req, res) => {
       title: optionalText(120),
       description: optionalText(1200),
       priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
+      currentState: z.enum(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"]).optional(),
+      parentId: z.string().nullable().optional(),
+      templateId: z.string().nullable().optional(),
+      templateType: z.enum(templateTypes).nullable().optional(),
+      structureState: z.enum(["FREEFORM", "TEMPLATED"]).optional(),
       assigneeIds: z.array(z.string()).max(20).optional(),
       watcherIds: z.array(z.string()).max(50).optional(),
       dueDate: z.string().nullable().optional(),
       formValues: z.record(text(0, 1000)).optional()
     })
     .parse(req.body);
+
+  const hasFormPatch = patch.formValues !== undefined;
+  const hasTaskPatch = Object.keys(patch).some((key) => key !== "formValues");
+  if (hasTaskPatch && !requireRole(req, res, "EDITOR")) return;
+  if (hasFormPatch && !canEditForm(req.user!, task)) {
+    res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
+    return;
+  }
 
   if (patch.assigneeIds && !validateMembers(patch.assigneeIds)) {
     res.status(400).json({ error: "INVALID_ASSIGNEE", requestId: req.requestId });
@@ -165,8 +245,42 @@ app.patch("/api/tasks/:taskId", (req, res) => {
     res.status(400).json({ error: "INVALID_WATCHER", requestId: req.requestId });
     return;
   }
+  if (patch.parentId !== undefined) {
+    if (patch.parentId === task.id) {
+      res.status(400).json({ error: "INVALID_PARENT", requestId: req.requestId });
+      return;
+    }
+    if (patch.parentId && !getVisibleTask(req, res, patch.parentId)) return;
+    task.parentId = patch.parentId;
+    addEngagement({ type: "PARENT_CHANGED", actorId: meId(req), taskId: task.id, targetId: patch.parentId ?? undefined, metadata: {} });
+  }
+  if (patch.templateId) {
+    const template = applyTemplate(task, patch.templateId);
+    if (!template) {
+      res.status(400).json({ error: "INVALID_TEMPLATE", requestId: req.requestId });
+      return;
+    }
+    addEngagement({ type: "TEMPLATE_APPLIED", actorId: meId(req), taskId: task.id, targetId: template.id, metadata: { fields: template.formDefinition.length } });
+  }
+  if (patch.templateId === null) {
+    task.templateId = null;
+    task.templateType = patch.templateType ?? task.templateType;
+    task.structureState = "FREEFORM";
+  }
+  if (patch.structureState === "FREEFORM" && !patch.templateId) {
+    task.structureState = "FREEFORM";
+  }
+  if (patch.templateType !== undefined && !patch.templateId) {
+    task.templateType = patch.templateType;
+  }
+  const assignablePatch = { ...patch };
+  delete assignablePatch.parentId;
+  delete assignablePatch.templateId;
+  delete assignablePatch.templateType;
+  delete assignablePatch.structureState;
 
-  Object.assign(task, patch, { updatedAt: now() });
+  Object.assign(task, assignablePatch, { updatedAt: now() });
+  addEngagement({ type: patch.formValues ? "FORM_SAVED" : "NODE_UPDATED", actorId: meId(req), taskId: task.id, metadata: { afterFeedback: Boolean(patch.formValues) } });
   addTimeline({
     taskId: task.id,
     type: "STATE_TRANSITION",
@@ -224,6 +338,7 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
     referencedNoteIds: body.referencedNoteIds,
     payload: { fromState, toState: body.toState }
   });
+  addEngagement({ type: "DECISION_TRANSITION", actorId: meId(req), taskId: task.id, metadata: { toState: body.toState, decisionType: body.decisionType } });
 
   const recipients = new Set([...task.assigneeIds, ...task.watcherIds]);
   if (body.toState === "PENDING_APPROVAL") data.members.filter((member) => ["APPROVER", "ADMIN"].includes(member.role)).forEach((member) => recipients.add(member.id));
@@ -259,6 +374,7 @@ app.post("/api/tasks/:taskId/notes", (req, res) => {
     updatedAt: now()
   };
   data.notes.unshift(note);
+  addEngagement({ type: "NOTE_UPDATED", actorId: meId(req), taskId: task.id, targetId: note.id, metadata: { created: true } });
   addTimeline({
     taskId: task.id,
     type: "NOTE_UPDATED",
@@ -278,6 +394,7 @@ app.patch("/api/notes/:noteId", (req, res) => {
   if (!getVisibleTask(req, res, note.taskId)) return;
   const body = z.object({ title: optionalText(120), content: optionalText(5000) }).parse(req.body);
   Object.assign(note, body, { lastEditorId: meId(req), updatedAt: now() });
+  addEngagement({ type: "NOTE_UPDATED", actorId: meId(req), taskId: note.taskId, targetId: note.id, metadata: { afterMention: referencingCommentExists(note.id) } });
 
   const referencingAuthors = data.comments
     .filter((comment) => comment.referencedNoteIds.includes(note.id))
@@ -331,9 +448,19 @@ app.delete("/api/notes/:noteId", (req, res) => {
 app.post("/api/tasks/:taskId/comments", (req, res) => {
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
-  const body = z.object({ content: text(1, 2000), referencedNoteIds: z.array(z.string()).max(20).default([]) }).parse(req.body);
-	  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
+  const body = z.object({
+    content: text(1, 2000),
+    referencedNoteIds: z.array(z.string()).max(20).default([]),
+    mentions: z.array(mentionSchema).max(30).default([])
+  }).parse(req.body);
+  const mentions = normalizeMentions(body.mentions);
+  const referencedNoteIds = noteRefsFromMentions(body.referencedNoteIds, mentions);
+	  if (!validateNoteRefs(req.user!, referencedNoteIds)) {
     res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
+    return;
+  }
+  if (!validateMentions(req.user!, mentions)) {
+    res.status(400).json({ error: "INVALID_MENTION", requestId: req.requestId });
     return;
   }
   const comment: ThreadComment = {
@@ -341,10 +468,13 @@ app.post("/api/tasks/:taskId/comments", (req, res) => {
     taskId: task.id,
     authorId: meId(req),
     content: body.content,
-    referencedNoteIds: body.referencedNoteIds,
+    referencedNoteIds,
+    mentions,
     createdAt: now()
   };
   data.comments.push(comment);
+  addEngagement({ type: "COMMENT_CREATED", actorId: meId(req), taskId: task.id, metadata: { mentions: mentions.length, crossFunctional: task.ownerId !== meId(req) } });
+  mentions.forEach((mention) => addEngagement({ type: "MENTION_CREATED", actorId: meId(req), taskId: task.id, targetId: mention.targetId, metadata: { type: mention.type, fieldKey: mention.fieldKey ?? null } }));
   [...task.assigneeIds, ...task.watcherIds].filter((userId) => userId !== meId(req)).forEach((userId) => {
     addInbox({
       userId,
@@ -355,6 +485,7 @@ app.post("/api/tasks/:taskId/comments", (req, res) => {
       message: `${req.user!.name}: ${comment.content.slice(0, 80)}`
     });
   });
+  notifyMentions(req, task, mentions);
   res.status(201).json(comment);
 });
 
@@ -367,13 +498,25 @@ app.patch("/api/comments/:commentId", (req, res) => {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
-  const body = z.object({ content: text(1, 2000), referencedNoteIds: z.array(z.string()).max(20).default([]) }).parse(req.body);
-	  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
+  const body = z.object({
+    content: text(1, 2000),
+    referencedNoteIds: z.array(z.string()).max(20).default([]),
+    mentions: z.array(mentionSchema).max(30).default([])
+  }).parse(req.body);
+  const mentions = normalizeMentions(body.mentions);
+  const referencedNoteIds = noteRefsFromMentions(body.referencedNoteIds, mentions);
+	  if (!validateNoteRefs(req.user!, referencedNoteIds)) {
     res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
     return;
   }
+  if (!validateMentions(req.user!, mentions)) {
+    res.status(400).json({ error: "INVALID_MENTION", requestId: req.requestId });
+    return;
+  }
   comment.content = body.content;
-  comment.referencedNoteIds = body.referencedNoteIds;
+  comment.referencedNoteIds = referencedNoteIds;
+  comment.mentions = mentions;
+  notifyMentions(req, task, mentions);
   res.json(comment);
 });
 
@@ -414,8 +557,17 @@ app.post("/api/templates", (req, res) => {
   if (!requireRole(req, res, "EDITOR")) return;
   const body = z.object({
     name: text(1, 120),
-    type: z.enum(["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"]),
-    enabled: z.boolean().default(true)
+    type: z.enum(templateTypes),
+    enabled: z.boolean().default(true),
+    formDefinition: z.array(z.object({
+      key: z.string().min(1).max(80),
+      label: z.string().min(1).max(120),
+      type: z.enum(["TEXT", "LONG_TEXT", "NUMBER", "DATE", "SELECT"]).default("TEXT"),
+      required: z.boolean().default(false),
+      helpText: z.string().max(240).optional(),
+      options: z.array(z.string().max(80)).optional()
+    })).max(20).default([]),
+    inspectionCriteria: z.array(z.string().min(1).max(240)).max(20).default([])
   }).parse(req.body);
   const template: Template = {
     id: `tpl-${crypto.randomUUID()}`,
@@ -423,6 +575,8 @@ app.post("/api/templates", (req, res) => {
     type: body.type,
     version: 1,
     enabled: body.enabled,
+    formDefinition: body.formDefinition,
+    inspectionCriteria: body.inspectionCriteria,
     workflow: [
       { from: "DRAFT", to: "IN_PROGRESS", label: "시작", isDecision: false, decisionType: "STATE_ONLY" },
       { from: "IN_PROGRESS", to: "DONE", label: "완료", isDecision: body.type !== "TASK", decisionType: body.type === "TASK" ? "STATE_ONLY" : "APPROVE" }
@@ -438,8 +592,17 @@ app.patch("/api/templates/:templateId", (req, res) => {
   if (!template) return res.status(404).json({ error: "TEMPLATE_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
     name: optionalText(120),
-    type: z.enum(["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"]).optional(),
-    enabled: z.boolean().optional()
+    type: z.enum(templateTypes).optional(),
+    enabled: z.boolean().optional(),
+    formDefinition: z.array(z.object({
+      key: z.string().min(1).max(80),
+      label: z.string().min(1).max(120),
+      type: z.enum(["TEXT", "LONG_TEXT", "NUMBER", "DATE", "SELECT"]).default("TEXT"),
+      required: z.boolean().default(false),
+      helpText: z.string().max(240).optional(),
+      options: z.array(z.string().max(80)).optional()
+    })).max(20).optional(),
+    inspectionCriteria: z.array(z.string().min(1).max(240)).max(20).optional()
   }).parse(req.body);
   Object.assign(template, body);
   template.version += 1;
@@ -518,6 +681,7 @@ app.delete("/api/admin/members/:memberId", (req, res) => {
 
 app.get("/api/analytics/retention", (_req, res) => {
   if (!requireRole(_req, res, "ADMIN")) return;
+  data.analytics = calculateAnalytics();
   res.json(data.analytics);
 });
 

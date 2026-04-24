@@ -83,6 +83,16 @@ function formatFailure(cause: string, impact: string, nextAction: string) {
   return `${cause}. ${impact}. ${nextAction}.`;
 }
 
+function decisionHint(state: TaskState, canApprove: boolean) {
+  if (state === "DRAFT") return "다음 권장 액션: 시작";
+  if (state === "IN_PROGRESS") return "다음 권장 액션: 검토 요청";
+  if (state === "PENDING_APPROVAL") {
+    return canApprove ? "다음 권장 액션: 승인" : "승인자 확인 대기: 승인 권한이 필요합니다";
+  }
+  if (state === "DONE") return "완료 상태입니다";
+  return "현재 상태에서는 추가 액션이 제한됩니다";
+}
+
 function isDueToday(value: string | null | undefined) {
   if (!value) return false;
   const today = new Date();
@@ -728,7 +738,8 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
 
   if (!detail || !task) return <Centered><div className="loader" /></Centered>;
 
-	  const { parent, notes, referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children } = detail;
+	  const { parent, notes, referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
+  const canEditForm = permissions?.canEditForm ?? ["ADMIN", "EDITOR", "APPROVER"].includes(me.role);
   const changed = hasChangedSinceSeen(task, parent, me.id);
   const canApprove = ["APPROVER", "ADMIN"].includes(me.role);
   const canDeleteTask = me.role === "ADMIN" || task.ownerId === me.id;
@@ -789,7 +800,18 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
           <div className="task-heading-actions">
             {autoSaving && <span className="save-indicator">자동저장 중</span>}
             {actionError && <button className="button secondary" onClick={() => setTaskDraft({ title: task.title, description: task.description })}>되돌리기</button>}
-            <button className="button danger" disabled={busy || !canDeleteTask} title={canDeleteTask ? "태스크 삭제" : "소유자 또는 관리자만 삭제할 수 있습니다."} onClick={() => void deleteTask()}>삭제</button>
+            <button
+              className="button danger"
+              disabled={busy || !canDeleteTask}
+              title={
+                canDeleteTask
+                  ? "태스크 삭제"
+                  : "삭제 불가: 현재 사용자는 삭제 권한이 없습니다. 소유자이거나 관리자 권한일 때 삭제할 수 있습니다."
+              }
+              onClick={() => void deleteTask()}
+            >
+              삭제
+            </button>
           </div>
         </div>
         <textarea
@@ -816,8 +838,8 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
         <SystemFieldsPanel task={task} members={members} childrenCount={children.length} notes={notes} comments={comments} onReload={load} />
 
         <div className="main-column">
+          <FormOutput task={task} canEditForm={canEditForm} onReload={load} />
           <NotesSection taskId={task.id} notes={notes} members={members} onReload={load} />
-          <FormOutput task={task} onReload={load} />
         </div>
 
         <TaskRightPanel
@@ -835,11 +857,11 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
       <div className="decision-bar">
         <div>
           <strong>결정 액션</strong>
-          <span>{actionError ?? "사유와 참조 노트가 타임라인에 기록됩니다."}</span>
+          <span>{actionError ?? decisionHint(task.currentState, canApprove)}</span>
         </div>
         <div className="bar-actions">
           {task.currentState === "DRAFT" && (
-            <button className="button secondary" onClick={() => setDecision({ toState: "IN_PROGRESS", decisionType: "STATE_ONLY", title: "작업 시작" })}>시작</button>
+            <button className="button primary" onClick={() => setDecision({ toState: "IN_PROGRESS", decisionType: "STATE_ONLY", title: "작업 시작" })}>시작</button>
           )}
           {task.currentState === "IN_PROGRESS" && (
             <button className="button primary" onClick={() => setDecision({ toState: "PENDING_APPROVAL", decisionType: "SUPPLEMENT", title: "검토 요청" })}>검토 요청</button>
@@ -852,7 +874,11 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
             </>
           )}
           {task.currentState === "PENDING_APPROVAL" && !canApprove && (
-            <button className="button secondary" disabled title="승인자 또는 관리자만 결정 전이를 실행할 수 있습니다.">
+            <button
+              className="button secondary"
+              disabled
+              title="결정 전이 불가: 승인 권한이 필요합니다. 승인자 또는 관리자 권한으로 요청하거나 권한 변경 후 다시 시도하세요."
+            >
               승인 권한 필요
             </button>
           )}
@@ -891,7 +917,17 @@ function TaskRightPanel({
   me: Member;
   onReload: () => Promise<void>;
 }) {
-  const [tab, setTab] = useState<"thread" | "timeline">("thread");
+  const [tab, setTab] = useState<"thread" | "timeline">(() => {
+    const value = new URLSearchParams(window.location.search).get("rt");
+    return value === "timeline" ? "timeline" : "thread";
+  });
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (tab === "thread") url.searchParams.delete("rt");
+    else url.searchParams.set("rt", tab);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [tab]);
   return (
     <aside className="task-right-panel">
       <Tabs
@@ -1007,12 +1043,20 @@ function SystemFieldsPanel({
 }
 
 function NotesSection({ taskId, notes, members, onReload }: { taskId: string; notes: Note[]; members: Member[]; onReload: () => Promise<void> }) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set(notes.map((note) => note.id)));
+  const [open, setOpen] = useState<Set<string>>(() => {
+    const stored = window.localStorage.getItem(`task-notes-open:${taskId}`);
+    if (stored) return new Set(stored.split(",").filter(Boolean));
+    return new Set(notes.map((note) => note.id));
+  });
   const [creating, setCreating] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.localStorage.setItem(`task-notes-open:${taskId}`, [...open].join(","));
+  }, [open, taskId]);
 
   const createNote = async () => {
     if (!title.trim()) {
@@ -1457,7 +1501,7 @@ function MentionComposer({
   );
 }
 
-function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promise<void> }) {
+function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditForm: boolean; onReload: () => Promise<void> }) {
   const fields = task.template?.formDefinition ?? [];
   const entries = fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues);
   const [editing, setEditing] = useState(false);
@@ -1470,6 +1514,10 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
   }, [task.formValues, task.templateId]);
 
   const save = async () => {
+    if (!canEditForm) {
+      setError("양식 수정 권한이 없습니다. 소유자, 담당자 또는 관리자에게 권한을 요청하세요.");
+      return;
+    }
     const next = Object.fromEntries(rows.filter(([key]) => key.trim()).map(([key, value]) => [key.trim(), value.trim()]));
     try {
       setError(null);
@@ -1489,7 +1537,16 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
     <section className="panel">
       <PanelHeader
         title="양식 산출물"
-        action={<button className="button secondary" onClick={() => setEditing((v) => !v)}>{editing ? "닫기" : "수정"}</button>}
+        action={
+          <button
+            className="button secondary"
+            disabled={!canEditForm}
+            title={canEditForm ? "양식 산출물 수정" : "수정 불가: 소유자, 담당자 또는 관리자만 양식을 수정할 수 있습니다."}
+            onClick={() => setEditing((v) => !v)}
+          >
+            {editing ? "닫기" : "수정"}
+          </button>
+        }
       />
       {editing ? (
         <div className="form-output-editor">
@@ -1550,7 +1607,10 @@ function FormOutput({ task, onReload }: { task: TaskView; onReload: () => Promis
 }
 
 function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]; notes: Note[]; members: Member[] }) {
-  const [openSessions, setOpenSessions] = useState<Set<string>>(new Set());
+  const [openSessions, setOpenSessions] = useState<Set<string>>(() => {
+    const value = window.localStorage.getItem("task-timeline-open-sessions");
+    return value ? new Set(value.split(",").filter(Boolean)) : new Set();
+  });
   const sessions = useMemo(() => {
     const rows: Array<{ id: string; representative: TimelineEvent; hidden: TimelineEvent[] }> = [];
     timeline.forEach((event) => {
@@ -1566,6 +1626,9 @@ function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]
   }, [timeline]);
   const hiddenSessionIds = sessions.filter((session) => session.hidden.length > 0).map((session) => session.id);
   const allOpen = hiddenSessionIds.length > 0 && hiddenSessionIds.every((id) => openSessions.has(id));
+  useEffect(() => {
+    window.localStorage.setItem("task-timeline-open-sessions", [...openSessions].join(","));
+  }, [openSessions]);
   const renderEvent = (event: TimelineEvent) => (
     <div className="timeline-item" key={event.id}>
       <span className="timeline-dot" />
@@ -1725,17 +1788,61 @@ function InboxView({ data, onReload }: { data: AppData; onReload: () => Promise<
 }
 
 function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; members: Member[]; me: Member; onReload: () => Promise<void> }) {
+  const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const initialViewMode = searchParams.get("view");
+  const initialSortBy = searchParams.get("sort");
+  const initialGroupBy = searchParams.get("group");
+  const initialFilterState = searchParams.get("state");
+  const initialFilterType = searchParams.get("type");
+  const initialQuery = searchParams.get("q");
+  const initialQuickFilter = searchParams.get("qf");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
   const [templateType, setTemplateType] = useState<TemplateType>("TASK");
-  const [query, setQuery] = useState("");
-  const [filterState, setFilterState] = useState<"ALL" | TaskState>("ALL");
-  const [filterType, setFilterType] = useState<"ALL" | TemplateType>("ALL");
-  const [sortBy, setSortBy] = useState("manual");
-  const [viewMode, setViewMode] = useState<"list" | "board" | "backlog" | "hierarchy" | "graph">("list");
-  const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee">("none");
-  const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">("all");
+  const [query, setQuery] = useState(initialQuery ?? "");
+  const [filterState, setFilterState] = useState<"ALL" | TaskState>(() =>
+    initialFilterState && states.includes(initialFilterState as "ALL" | TaskState) ? (initialFilterState as "ALL" | TaskState) : "ALL"
+  );
+  const [filterType, setFilterType] = useState<"ALL" | TemplateType>(() =>
+    initialFilterType && templateTypes.includes(initialFilterType as "ALL" | TemplateType) ? (initialFilterType as "ALL" | TemplateType) : "ALL"
+  );
+  const [sortBy, setSortBy] = useState(() =>
+    initialSortBy && ["manual", "updated", "due", "priority"].includes(initialSortBy) ? initialSortBy : "manual"
+  );
+  const [viewMode, setViewMode] = useState<"list" | "board" | "backlog" | "hierarchy" | "graph">(() =>
+    initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "hierarchy" || initialViewMode === "graph" ? initialViewMode : "list"
+  );
+  const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee">(() =>
+    initialGroupBy === "state" || initialGroupBy === "assignee" ? initialGroupBy : "none"
+  );
+  const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">(() =>
+    initialQuickFilter === "mine" || initialQuickFilter === "pending" || initialQuickFilter === "due-today" ? initialQuickFilter : "all"
+  );
   const meId = me.id;
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (quickFilter === "all") url.searchParams.delete("qf");
+    else url.searchParams.set("qf", quickFilter);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [quickFilter]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (viewMode === "list") url.searchParams.delete("view");
+    else url.searchParams.set("view", viewMode);
+    if (sortBy === "manual") url.searchParams.delete("sort");
+    else url.searchParams.set("sort", sortBy);
+    if (groupBy === "none") url.searchParams.delete("group");
+    else url.searchParams.set("group", groupBy);
+    if (filterState === "ALL") url.searchParams.delete("state");
+    else url.searchParams.set("state", filterState);
+    if (filterType === "ALL") url.searchParams.delete("type");
+    else url.searchParams.set("type", filterType);
+    if (!query.trim()) url.searchParams.delete("q");
+    else url.searchParams.set("q", query.trim());
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [filterState, filterType, groupBy, query, sortBy, viewMode]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
