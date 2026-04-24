@@ -1,4 +1,4 @@
-import type { Member, Note, Task, Template, ThreadComment, TimelineEvent } from "@hwe/shared";
+import type { Member, Note, Task, TaskAttachment, Template, ThreadComment, TimelineEvent } from "@hwe/shared";
 
 export type TaskView = Task & {
   template: Template | null;
@@ -14,6 +14,7 @@ export type TaskDetail = {
   children: TaskView[];
   referenceableTasks: TaskView[];
   notes: Note[];
+  attachments: TaskAttachment[];
   referenceableNotes: Note[];
   comments: ThreadComment[];
   timeline: TimelineEvent[];

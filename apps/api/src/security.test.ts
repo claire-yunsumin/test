@@ -126,6 +126,28 @@ describe("authorization boundaries", () => {
     assert.equal(response.status, 400);
     assert.equal(body.error, "CANNOT_REMOVE_SELF");
   });
+
+  test("allows unit owners to invite members into their unit", async () => {
+    const { response, body } = await api("/api/admin/invitations", {
+      userId: "u-pm",
+      method: "POST",
+      body: JSON.stringify({ email: "unit.owner.invite@example.com", role: "VIEWER", unitId: "unit-growth" })
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal(body.member.unit, "성장 전략");
+  });
+
+  test("prevents non-owners from inviting members into a unit", async () => {
+    const { response, body } = await api("/api/admin/invitations", {
+      userId: "u-viewer",
+      method: "POST",
+      body: JSON.stringify({ email: "blocked.invite@example.com", role: "VIEWER", unitId: "unit-growth" })
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(body.error, "FORBIDDEN");
+  });
 });
 
 describe("input validation", () => {
@@ -289,22 +311,252 @@ describe("input validation", () => {
     assert.ok(body.mentionCount >= 1);
     assert.ok(body.mentionThreadCount >= 1);
   });
+
+  test("creates and applies approval policy on transition", async () => {
+    const policy = await api("/api/admin/approval-policies", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        name: "Test parallel policy",
+        mode: "PARALLEL",
+        approverType: "MEMBER",
+        approverIds: ["u-lead", "u-admin"],
+        minApprovals: 2,
+        approvalLines: [
+          { type: "CONSENSUS", participantIds: ["u-lead", "u-admin"], minApprovals: 2 },
+          { type: "APPROVAL", participantIds: ["u-admin"], minApprovals: 1 }
+        ],
+        finalApproverId: "u-admin"
+      })
+    });
+    assert.equal(policy.response.status, 201);
+    assert.equal(policy.body.approvalLines.length, 2);
+    assert.equal(policy.body.finalApproverId, "u-admin");
+
+    const transitioned = await api("/api/tasks/task-marketing-strategy/transition", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "DONE",
+        decisionType: "APPROVE",
+        reason: "policy test",
+        approvalPolicyId: policy.body.id
+      })
+    });
+    assert.equal(transitioned.response.status, 200);
+    assert.equal(transitioned.body.task.approvalPolicyId, policy.body.id);
+    assert.equal(transitioned.body.event.payload.approvalPolicyId, policy.body.id);
+    assert.equal(transitioned.body.event.payload.approvalLineCount, 2);
+    assert.equal(transitioned.body.event.payload.finalApproverId, "u-admin");
+  });
+
+  test("rejects invalid transition combination", async () => {
+    const transitioned = await api("/api/tasks/task-customer-interview/transition", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "DONE",
+        decisionType: "APPROVE",
+        reason: "skip flow"
+      })
+    });
+    assert.equal(transitioned.response.status, 400);
+    assert.equal(transitioned.body.error, "INVALID_TRANSITION");
+  });
+
+  test("rejects invalid approvalPolicyId regardless of target state", async () => {
+    const transitioned = await api("/api/tasks/task-marketing-strategy/transition", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "IN_PROGRESS",
+        decisionType: "SUPPLEMENT",
+        reason: "rollback",
+        approvalPolicyId: "ap-missing"
+      })
+    });
+    assert.equal(transitioned.response.status, 400);
+    assert.equal(transitioned.body.error, "INVALID_APPROVAL_POLICY");
+  });
+
+  test("blocks decision when actor is not policy approver", async () => {
+    const policy = await api("/api/admin/approval-policies", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        name: "Admin only final",
+        mode: "SINGLE",
+        approverType: "MEMBER",
+        approverIds: ["u-admin"],
+        minApprovals: 1,
+        approvalLines: [{ type: "APPROVAL", participantIds: ["u-admin"], minApprovals: 1 }]
+      })
+    });
+    assert.equal(policy.response.status, 201);
+
+    const transitioned = await api("/api/tasks/task-marketing-strategy/transition", {
+      userId: "u-lead",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "DONE",
+        decisionType: "APPROVE",
+        reason: "attempt by non policy approver",
+        approvalPolicyId: policy.body.id
+      })
+    });
+    assert.equal(transitioned.response.status, 403);
+    assert.equal(transitioned.body.error, "NOT_POLICY_APPROVER");
+  });
+
+  test("applies unit default approval policy when requesting approval", async () => {
+    const unitPatch = await api("/api/units/unit-growth", {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ defaultApprovalPolicyId: "ap-growth-consensus" })
+    });
+    assert.equal(unitPatch.response.status, 200);
+
+    const transitioned = await api("/api/tasks/task-market-validation/transition", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "PENDING_APPROVAL",
+        decisionType: "SUPPLEMENT",
+        reason: "use unit default policy"
+      })
+    });
+    assert.equal(transitioned.response.status, 200);
+    assert.equal(transitioned.body.event.payload.approvalPolicyId, "ap-growth-consensus");
+  });
+
+  test("supports template workflow transition via toStatusId", async () => {
+    const template = await api("/api/templates", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ name: "WF Template", type: "TASK", enabled: true })
+    });
+    assert.equal(template.response.status, 201);
+    const workflowPatch = await api(`/api/templates/${template.body.id}/workflow`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({
+        statuses: [
+          { id: "open", name: "Open", category: "OPEN", isDefault: true },
+          { id: "review", name: "Review", category: "IN_PROGRESS" },
+          { id: "done", name: "Done", category: "DONE" }
+        ],
+        transitions: [
+          { fromStatusId: "open", toStatusId: "review", label: "검토", decisionType: "STATE_ONLY", isDecision: false },
+          { fromStatusId: "review", toStatusId: "done", label: "완료", decisionType: "APPROVE", isDecision: true }
+        ]
+      })
+    });
+    assert.equal(workflowPatch.response.status, 200);
+
+    const task = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "workflow task", templateId: template.body.id })
+    });
+    assert.equal(task.response.status, 201);
+    assert.equal(task.body.workflowStatusId, "open");
+
+    const transitioned = await api(`/api/tasks/${task.body.id}/transition`, {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "IN_PROGRESS",
+        toStatusId: "review",
+        decisionType: "STATE_ONLY",
+        reason: "move review"
+      })
+    });
+    assert.equal(transitioned.response.status, 200);
+    assert.equal(transitioned.body.task.workflowStatusId, "review");
+  });
+
+  test("requires approval policy when transition approval is enabled", async () => {
+    const template = await api("/api/templates", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ name: "Approval Transition Template", type: "TASK", enabled: true })
+    });
+    assert.equal(template.response.status, 201);
+    const workflowPatch = await api(`/api/templates/${template.body.id}/workflow`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({
+        statuses: [
+          { id: "open", name: "Open", category: "OPEN", isDefault: true },
+          { id: "approve_gate", name: "Approve Gate", category: "PENDING_APPROVAL" },
+          { id: "done", name: "Done", category: "DONE" }
+        ],
+        transitions: [
+          { fromStatusId: "open", toStatusId: "approve_gate", label: "승인요청", decisionType: "SUPPLEMENT", isDecision: true, approvalEnabled: true, approvalPolicyId: "ap-default-unit-approver" },
+          { fromStatusId: "approve_gate", toStatusId: "done", label: "완료", decisionType: "APPROVE", isDecision: true, approvalEnabled: false, approvalPolicyId: null }
+        ]
+      })
+    });
+    assert.equal(workflowPatch.response.status, 200);
+
+    const task = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "approval task", templateId: template.body.id })
+    });
+    assert.equal(task.response.status, 201);
+
+    const transitioned = await api(`/api/tasks/${task.body.id}/transition`, {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "PENDING_APPROVAL",
+        toStatusId: "approve_gate",
+        decisionType: "SUPPLEMENT",
+        reason: "need approval"
+      })
+    });
+    assert.equal(transitioned.response.status, 200);
+    assert.equal(transitioned.body.event.payload.transitionApprovalEnabled, true);
+    assert.equal(transitioned.body.event.payload.approvalPolicyId, "ap-default-unit-approver");
+  });
 });
 
 describe("admin CRUD smoke path", () => {
   test("creates, updates, and deletes mutable resources", async () => {
+    const workflowStatuses = await api("/api/workflow/statuses", {
+      method: "PATCH",
+      body: JSON.stringify({
+        statuses: [
+          { id: "open", name: "Open", category: "OPEN", isDefault: true },
+          { id: "doing", name: "Doing", category: "IN_PROGRESS" },
+          { id: "done", name: "Done", category: "DONE" }
+        ]
+      })
+    });
+    assert.equal(workflowStatuses.response.status, 200);
+    assert.equal(workflowStatuses.body.length, 3);
+
+    const bucket = await api("/api/buckets", {
+      method: "POST",
+      body: JSON.stringify({ name: "버그", unitId: "unit-growth" })
+    });
+    assert.equal(bucket.response.status, 201);
+
     const createdTask = await api("/api/tasks", {
       method: "POST",
-      body: JSON.stringify({ title: "Automated CRUD task", templateType: "TASK" })
+      body: JSON.stringify({ title: "Automated CRUD task", templateType: "TASK", bucketId: bucket.body.id })
     });
     assert.equal(createdTask.response.status, 201);
+    assert.equal(createdTask.body.bucketId, bucket.body.id);
 
     const updatedTask = await api(`/api/tasks/${createdTask.body.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ title: "Automated CRUD task updated", description: "verified" })
+      body: JSON.stringify({ title: "Automated CRUD task updated", description: "verified", workflowPhase: "ACTIVE" })
     });
     assert.equal(updatedTask.response.status, 200);
     assert.equal(updatedTask.body.title, "Automated CRUD task updated");
+    assert.equal(updatedTask.body.workflowPhase, "ACTIVE");
 
     const note = await api(`/api/tasks/${createdTask.body.id}/notes`, {
       method: "POST",
@@ -318,6 +570,23 @@ describe("admin CRUD smoke path", () => {
     });
     assert.equal(comment.response.status, 201);
 
+    const linkAttachment = await api(`/api/tasks/${createdTask.body.id}/attachments/link`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Git PR", url: "https://github.com/example/repo/pull/1" })
+    });
+    assert.equal(linkAttachment.response.status, 201);
+
+    const fileAttachment = await api(`/api/tasks/${createdTask.body.id}/attachments/file`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: "spec.md",
+        mimeType: "text/markdown",
+        size: 128,
+        contentDataUrl: "data:text/markdown;base64,IyBTcGVj"
+      })
+    });
+    assert.equal(fileAttachment.response.status, 201);
+
     const template = await api("/api/templates", {
       method: "POST",
       body: JSON.stringify({ name: "CRUD Template", type: "TASK", enabled: true })
@@ -326,12 +595,33 @@ describe("admin CRUD smoke path", () => {
 
     const memberInvite = await api("/api/admin/invitations", {
       method: "POST",
-      body: JSON.stringify({ email: "crud.member@example.com", role: "VIEWER" })
+      body: JSON.stringify({ email: "crud.member@example.com", role: "VIEWER", unitId: "unit-growth" })
     });
     assert.equal(memberInvite.response.status, 201);
+    assert.equal(memberInvite.body.member.unit, "성장 전략");
 
     const memberDelete = await api(`/api/admin/members/${memberInvite.body.member.id}`, { method: "DELETE" });
     assert.equal(memberDelete.response.status, 200);
+
+    const createdUnit = await api("/api/units", {
+      method: "POST",
+      body: JSON.stringify({ name: "Temp Unit", purpose: "CRUD test" })
+    });
+    assert.equal(createdUnit.response.status, 201);
+
+    const updatedUnit = await api(`/api/units/${createdUnit.body.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Temp Unit Renamed", defaultApprovalPolicyId: "ap-default-unit-approver" })
+    });
+    assert.equal(updatedUnit.response.status, 200);
+    assert.equal(updatedUnit.body.name, "Temp Unit Renamed");
+    assert.equal(updatedUnit.body.defaultApprovalPolicyId, "ap-default-unit-approver");
+
+    const deletedUnit = await api(`/api/units/${createdUnit.body.id}`, { method: "DELETE" });
+    assert.equal(deletedUnit.response.status, 200);
+
+    const bucketDelete = await api(`/api/buckets/${bucket.body.id}`, { method: "DELETE" });
+    assert.equal(bucketDelete.response.status, 200);
 
     const templateDelete = await api(`/api/templates/${template.body.id}`, { method: "DELETE" });
     assert.equal(templateDelete.response.status, 200);

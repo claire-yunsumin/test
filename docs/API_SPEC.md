@@ -154,7 +154,7 @@
 - `DELETE /api/tasks/:taskId`
 
 - `POST /api/tasks/:taskId/transition`
-  - body: `{ toState, decisionType, reason, referencedNoteIds? }`
+  - body: `{ toState, decisionType, reason, referencedNoteIds?, approvalPolicyId? }`
 
 ---
 
@@ -205,8 +205,13 @@
 ## 7) 관리자
 
 - `GET /api/admin/members`
+- `GET /api/admin/approval-policies`
+- `POST /api/admin/approval-policies`
+  - body 예시:
+  - `{ name, mode, approvalLines:[{ type:"CONSENSUS"|"APPROVAL", participantIds:[...], minApprovals }], finalApproverId? }`
+- `PATCH /api/admin/approval-policies/:policyId`
 - `POST /api/admin/invitations`
-  - body: `{ email, role }`
+  - body: `{ email, role, unitId? }`
 - `PATCH /api/admin/members/:memberId`
   - body: `{ role }`
 - `DELETE /api/admin/members/:memberId`

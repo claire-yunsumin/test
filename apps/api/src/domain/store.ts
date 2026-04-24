@@ -45,7 +45,14 @@ export function addTimeline(event: Omit<TimelineEvent, "id" | "createdAt">) {
 }
 
 export function addInbox(item: Omit<(typeof data.inbox)[number], "id" | "createdAt" | "readAt"> & { readAt?: string | null }) {
-  const row = { ...item, id: `inbox-${crypto.randomUUID()}`, readAt: item.readAt ?? null, createdAt: now() };
+  const row = {
+    ...item,
+    id: `inbox-${crypto.randomUUID()}`,
+    readAt: item.readAt ?? null,
+    ackAt: item.ackAt ?? null,
+    remindCount: item.remindCount ?? 0,
+    createdAt: now()
+  };
   data.inbox.unshift(row);
   return row;
 }

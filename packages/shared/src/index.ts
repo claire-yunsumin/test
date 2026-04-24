@@ -1,12 +1,14 @@
 export type TemplateType = "VISION" | "AXIS" | "OBJECTIVE" | "KEYRESULT" | "TASK";
 export type TaskState = "DRAFT" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
+export type WorkflowPhase = "BACKLOG" | "PLAN" | "ACTIVE" | "CLOSED";
+export type WorkflowStatusCategory = "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type Role = "VIEWER" | "EDITOR" | "APPROVER" | "ADMIN";
 export type DecisionType = "APPROVE" | "REJECT" | "SUPPLEMENT" | "STATE_ONLY";
 export type InboxComponent = "DECISION" | "DISCUSSION" | "AWARENESS" | "RESULT";
 export type StructureState = "FREEFORM" | "TEMPLATED";
 export type MentionType = "MEMBER" | "TASK" | "FORM_FIELD" | "NOTE";
-export type FormFieldType = "TEXT" | "LONG_TEXT" | "NUMBER" | "DATE" | "SELECT";
+export type FormFieldType = "TEXT" | "LONG_TEXT" | "NUMBER" | "DATE" | "SELECT" | "FILE";
 export type EngagementEventType =
   | "NODE_CREATED"
   | "NODE_UPDATED"
@@ -102,21 +104,52 @@ export type Task = {
   templateType: TemplateType | null;
   templateId: string | null;
   currentState: TaskState;
+  workflowPhase?: WorkflowPhase;
+  phaseOverride?: WorkflowPhase | null;
+  workflowStatusId?: string;
+  bucketId?: string | null;
   priority: Priority;
   ownerId: string;
   assigneeIds: string[];
   watcherIds: string[];
   dueDate: string | null;
   lastSeenAtByUser: Record<string, string>;
+  approvalPolicyId?: string | null;
   updatedAt: string;
   createdAt: string;
   formValues: Record<string, string>;
+  tags: string[];
+  attachmentIds?: string[];
+};
+
+export type TaskAttachment = {
+  id: string;
+  taskId: string;
+  kind: "FILE" | "LINK";
+  name: string;
+  mimeType?: string;
+  size?: number;
+  url?: string;
+  provider?: string;
+  contentDataUrl?: string;
+  createdBy: string;
+  createdAt: string;
 };
 
 export type Unit = {
   id: string;
   name: string;
   purpose: string;
+  defaultApprovalPolicyId?: string | null;
+};
+
+export type UnitMemberRole = "OWNER" | "MEMBER" | "VIEWER";
+
+export type UnitMember = {
+  id: string;
+  unitId: string;
+  memberId: string;
+  role: UnitMemberRole;
 };
 
 export type Folder = {
@@ -130,6 +163,22 @@ export type TaskList = {
   unitId: string;
   folderId: string | null;
   name: string;
+  defaultPhase?: WorkflowPhase;
+};
+
+export type Bucket = {
+  id: string;
+  unitId: string | null;
+  listId: string | null;
+  name: string;
+  order: number;
+};
+
+export type WorkflowStatusDefinition = {
+  id: string;
+  name: string;
+  category: WorkflowStatusCategory;
+  isDefault?: boolean;
 };
 
 export type InboxItem = {
@@ -141,7 +190,21 @@ export type InboxItem = {
   title: string;
   message: string;
   readAt: string | null;
+  ackAt?: string | null;
+  remindCount?: number;
+  sourceUserId?: string | null;
+  mentionCommentId?: string | null;
   createdAt: string;
+};
+
+export type NotificationSettings = {
+  userId: string;
+  emailEnabled: boolean;
+  pushEnabled: boolean;
+  digestEnabled: boolean;
+  mutedComponents: InboxComponent[];
+  mentionOnlyForWatchers: boolean;
+  slaHours: number;
 };
 
 export type Template = {
@@ -159,6 +222,45 @@ export type Template = {
     isDecision: boolean;
     decisionType: DecisionType;
   }>;
+  workflowSchema?: {
+    statuses: WorkflowStatusDefinition[];
+    transitions: Array<{
+      fromStatusId: string;
+      toStatusId: string;
+      label: string;
+      decisionType: DecisionType;
+      isDecision: boolean;
+      approvalEnabled?: boolean;
+      approvalPolicyId?: string | null;
+    }>;
+  };
+};
+
+export type ApprovalMode = "SINGLE" | "PARALLEL" | "CONSENSUS";
+export type ApprovalAssigneeType = "ROLE" | "MEMBER";
+export type ApprovalLineType = "CONSENSUS" | "APPROVAL";
+
+export type ApprovalLine = {
+  id: string;
+  type: ApprovalLineType;
+  participantIds: string[];
+  minApprovals: number;
+};
+
+export type ApprovalPolicy = {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  mode: ApprovalMode;
+  approverType: ApprovalAssigneeType;
+  approverRole?: Role;
+  approverIds?: string[];
+  minApprovals: number;
+  approvalLines?: ApprovalLine[];
+  finalApproverId?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type EngagementEvent = {
@@ -193,14 +295,20 @@ export type AppData = {
   me: Member;
   members: Member[];
   units: Unit[];
+  unitMembers: UnitMember[];
   folders: Folder[];
   lists: TaskList[];
+  buckets: Bucket[];
   tasks: Task[];
+  attachments: TaskAttachment[];
   notes: Note[];
   comments: ThreadComment[];
   timeline: TimelineEvent[];
   inbox: InboxItem[];
+  notificationSettings: NotificationSettings[];
   templates: Template[];
+  workflowStatuses: WorkflowStatusDefinition[];
+  approvalPolicies: ApprovalPolicy[];
   engagement: EngagementEvent[];
   analytics: Analytics;
 };
@@ -243,13 +351,43 @@ const workflow = (decision = true): Template["workflow"] => [
   { from: "PENDING_APPROVAL", to: "IN_PROGRESS", label: "보완 요청", isDecision: decision, decisionType: "SUPPLEMENT" }
 ];
 
-const makeTask = (task: Task): Task => task;
+export const DEFAULT_WORKFLOW_STATUSES: WorkflowStatusDefinition[] = [
+  { id: "open", name: "Open", category: "OPEN", isDefault: true },
+  { id: "in_progress", name: "In Progress", category: "IN_PROGRESS" },
+  { id: "pending_approval", name: "Pending Approval", category: "PENDING_APPROVAL" },
+  { id: "done", name: "Done", category: "DONE" },
+  { id: "canceled", name: "Canceled", category: "CANCELED" }
+];
+
+export const LEGACY_STATE_TO_STATUS_ID: Record<TaskState, string> = {
+  DRAFT: "open",
+  IN_PROGRESS: "in_progress",
+  PENDING_APPROVAL: "pending_approval",
+  DONE: "done",
+  CANCELED: "canceled"
+};
+
+const legacyStateToPhase = (state: TaskState): WorkflowPhase => {
+  if (state === "DRAFT") return "BACKLOG";
+  if (state === "DONE" || state === "CANCELED") return "CLOSED";
+  return "ACTIVE";
+};
+
+const makeTask = (task: Omit<Task, "tags"> & Partial<Pick<Task, "tags">>): Task => ({
+  ...task,
+  workflowStatusId: task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState],
+  workflowPhase: task.workflowPhase ?? legacyStateToPhase(task.currentState),
+  phaseOverride: task.phaseOverride ?? null,
+  bucketId: task.bucketId ?? null,
+  tags: task.tags ?? [],
+  attachmentIds: task.attachmentIds ?? []
+});
 
 export function createSeedData(): AppData {
   const units: Unit[] = [
-    { id: "unit-growth", name: "성장 전략", purpose: "시장/브랜드/포지셔닝 결정" },
-    { id: "unit-product", name: "제품 전략", purpose: "로드맵/출시/품질 운영" },
-    { id: "unit-ops", name: "운영 개선", purpose: "조직 프로세스/내부 효율화" }
+    { id: "unit-growth", name: "성장 전략", purpose: "시장/브랜드/포지셔닝 결정", defaultApprovalPolicyId: "ap-growth-consensus" },
+    { id: "unit-product", name: "제품 전략", purpose: "로드맵/출시/품질 운영", defaultApprovalPolicyId: "ap-default-unit-approver" },
+    { id: "unit-ops", name: "운영 개선", purpose: "조직 프로세스/내부 효율화", defaultApprovalPolicyId: "ap-default-unit-approver" }
   ];
   const folders: Folder[] = [
     { id: "folder-growth-planning", unitId: "unit-growth", name: "시장 전략" },
@@ -257,10 +395,15 @@ export function createSeedData(): AppData {
     { id: "folder-product-roadmap", unitId: "unit-product", name: "로드맵" }
   ];
   const lists: TaskList[] = [
-    { id: "list-growth-objective", unitId: "unit-growth", folderId: "folder-growth-planning", name: "Objective 리스트" },
-    { id: "list-growth-validation", unitId: "unit-growth", folderId: "folder-growth-exec", name: "Validation 리스트" },
-    { id: "list-product-phase", unitId: "unit-product", folderId: "folder-product-roadmap", name: "Phase 리스트" },
-    { id: "list-ops-backlog", unitId: "unit-ops", folderId: null, name: "운영 백로그" }
+    { id: "list-growth-objective", unitId: "unit-growth", folderId: "folder-growth-planning", name: "Objective 리스트", defaultPhase: "PLAN" },
+    { id: "list-growth-validation", unitId: "unit-growth", folderId: "folder-growth-exec", name: "Validation 리스트", defaultPhase: "ACTIVE" },
+    { id: "list-product-phase", unitId: "unit-product", folderId: "folder-product-roadmap", name: "Phase 리스트", defaultPhase: "PLAN" },
+    { id: "list-ops-backlog", unitId: "unit-ops", folderId: null, name: "운영 백로그", defaultPhase: "BACKLOG" }
+  ];
+  const buckets: Bucket[] = [
+    { id: "bucket-priority", unitId: null, listId: null, name: "우선 처리", order: 0 },
+    { id: "bucket-bugfix", unitId: null, listId: null, name: "버그 수정", order: 1 },
+    { id: "bucket-idea", unitId: null, listId: null, name: "아이디어", order: 2 }
   ];
   const members: Member[] = [
     { id: "u-pm", name: "박PM", email: "pm@selvasin4.local", role: "EDITOR", unit: "HWE" },
@@ -268,6 +411,15 @@ export function createSeedData(): AppData {
     { id: "u-lead", name: "이팀장", email: "lead@selvasin4.local", role: "APPROVER", unit: "리더십" },
     { id: "u-admin", name: "관리자", email: "admin@selvasin4.local", role: "ADMIN", unit: "운영" },
     { id: "u-viewer", name: "정뷰어", email: "viewer@selvasin4.local", role: "VIEWER", unit: "영업" }
+  ];
+  const unitMembers: UnitMember[] = [
+    { id: "um-growth-owner", unitId: "unit-growth", memberId: "u-pm", role: "OWNER" },
+    { id: "um-growth-member-1", unitId: "unit-growth", memberId: "u-marketing", role: "MEMBER" },
+    { id: "um-growth-member-2", unitId: "unit-growth", memberId: "u-lead", role: "MEMBER" },
+    { id: "um-growth-viewer", unitId: "unit-growth", memberId: "u-viewer", role: "VIEWER" },
+    { id: "um-product-owner", unitId: "unit-product", memberId: "u-pm", role: "OWNER" },
+    { id: "um-product-member", unitId: "unit-product", memberId: "u-lead", role: "MEMBER" },
+    { id: "um-ops-owner", unitId: "unit-ops", memberId: "u-admin", role: "OWNER" }
   ];
 
   const templates: Template[] = [
@@ -285,6 +437,17 @@ export function createSeedData(): AppData {
       ],
       inspectionCriteria: ["ICP 정의가 충분한가?", "White Space 근거가 있는가?", "포지셔닝 문장이 구매 기준과 연결되는가?"],
       workflow: workflow(true)
+      ,
+      workflowSchema: {
+        statuses: DEFAULT_WORKFLOW_STATUSES,
+        transitions: workflow(true).map((row) => ({
+          fromStatusId: LEGACY_STATE_TO_STATUS_ID[row.from],
+          toStatusId: LEGACY_STATE_TO_STATUS_ID[row.to],
+          label: row.label,
+          decisionType: row.decisionType,
+          isDecision: row.isDecision
+        }))
+      }
     },
     {
       id: "tpl-product-phase",
@@ -298,7 +461,17 @@ export function createSeedData(): AppData {
         { key: "launchSignal", label: "출시 신호", type: "TEXT", required: false }
       ],
       inspectionCriteria: ["출시 범위가 검증 가능하게 쓰였는가?", "품질 기준이 결정 가능하게 정의되었는가?"],
-      workflow: workflow(true)
+      workflow: workflow(true),
+      workflowSchema: {
+        statuses: DEFAULT_WORKFLOW_STATUSES,
+        transitions: workflow(true).map((row) => ({
+          fromStatusId: LEGACY_STATE_TO_STATUS_ID[row.from],
+          toStatusId: LEGACY_STATE_TO_STATUS_ID[row.to],
+          label: row.label,
+          decisionType: row.decisionType,
+          isDecision: row.isDecision
+        }))
+      }
     },
     {
       id: "tpl-task",
@@ -311,7 +484,51 @@ export function createSeedData(): AppData {
         { key: "blocker", label: "블로커", type: "TEXT", required: false }
       ],
       inspectionCriteria: ["산출물이 명확한가?", "블로커가 있으면 담당자에게 연결되었는가?"],
-      workflow: workflow(false)
+      workflow: workflow(false),
+      workflowSchema: {
+        statuses: DEFAULT_WORKFLOW_STATUSES,
+        transitions: workflow(false).map((row) => ({
+          fromStatusId: LEGACY_STATE_TO_STATUS_ID[row.from],
+          toStatusId: LEGACY_STATE_TO_STATUS_ID[row.to],
+          label: row.label,
+          decisionType: row.decisionType,
+          isDecision: row.isDecision
+        }))
+      }
+    }
+  ];
+  const approvalPolicies: ApprovalPolicy[] = [
+    {
+      id: "ap-default-unit-approver",
+      name: "기본 승인자 정책",
+      description: "APPROVER/ADMIN 역할로 단일 승인 요청",
+      enabled: true,
+      mode: "SINGLE",
+      approverType: "ROLE",
+      approverRole: "APPROVER",
+      approverIds: [],
+      minApprovals: 1,
+      approvalLines: [{ id: "line-default-approval", type: "APPROVAL", participantIds: ["u-lead"], minApprovals: 1 }],
+      finalApproverId: "u-admin",
+      createdAt: iso(260),
+      updatedAt: iso(2)
+    },
+    {
+      id: "ap-growth-consensus",
+      name: "성장전략 합의 정책",
+      description: "지정 멤버 병렬 합의(2인)",
+      enabled: true,
+      mode: "CONSENSUS",
+      approverType: "MEMBER",
+      approverIds: ["u-lead", "u-admin"],
+      minApprovals: 2,
+      approvalLines: [
+        { id: "line-growth-consensus", type: "CONSENSUS", participantIds: ["u-lead", "u-admin"], minApprovals: 2 },
+        { id: "line-growth-approval", type: "APPROVAL", participantIds: ["u-admin"], minApprovals: 1 }
+      ],
+      finalApproverId: "u-admin",
+      createdAt: iso(200),
+      updatedAt: iso(1)
     }
   ];
 
@@ -542,6 +759,7 @@ export function createSeedData(): AppData {
       formValues: {}
     })
   ];
+  const attachments: TaskAttachment[] = [];
 
   const notes: Note[] = [
     {
@@ -675,6 +893,9 @@ export function createSeedData(): AppData {
       title: "승인 검토 대기",
       message: "S/W 제품 마케팅전략에 대한 승인 판단이 필요합니다.",
       readAt: null,
+      ackAt: null,
+      remindCount: 0,
+      sourceUserId: "u-marketing",
       createdAt: iso(1)
     },
     {
@@ -686,6 +907,9 @@ export function createSeedData(): AppData {
       title: "참조한 노트가 수정됨",
       message: "김매니저가 분석 요약을 업데이트했습니다.",
       readAt: null,
+      ackAt: null,
+      remindCount: 0,
+      sourceUserId: "u-marketing",
       createdAt: iso(2)
     },
     {
@@ -697,6 +921,9 @@ export function createSeedData(): AppData {
       title: "상위 목표 변경",
       message: "상위 결정 질문이 업데이트되었습니다.",
       readAt: null,
+      ackAt: null,
+      remindCount: 0,
+      sourceUserId: "u-pm",
       createdAt: iso(5)
     },
     {
@@ -708,9 +935,94 @@ export function createSeedData(): AppData {
       title: "이전 메시지 정리 완료",
       message: "지난 캠페인 회고가 완료되었습니다.",
       readAt: iso(10),
+      ackAt: iso(10),
+      remindCount: 0,
+      sourceUserId: "u-pm",
       createdAt: iso(12)
+    },
+    {
+      id: "inbox-5",
+      userId: "u-admin",
+      taskId: "task-marketing-strategy",
+      componentType: "DISCUSSION",
+      eventType: "MENTION",
+      title: "관리자 멘션 확인 요청",
+      message: "박PM: @관리자 정책 검토 부탁드립니다.",
+      readAt: null,
+      ackAt: null,
+      remindCount: 1,
+      sourceUserId: "u-pm",
+      mentionCommentId: "comment-seed-admin-1",
+      createdAt: iso(3)
+    },
+    {
+      id: "inbox-6",
+      userId: "u-admin",
+      taskId: "task-market-validation",
+      componentType: "DECISION",
+      eventType: "APPROVAL_REQUESTED",
+      title: "전역 승인 정책 검토 요청",
+      message: "김매니저: 전환 정책 변경 승인 부탁드립니다.",
+      readAt: null,
+      ackAt: null,
+      remindCount: 0,
+      sourceUserId: "u-marketing",
+      createdAt: iso(4)
+    },
+    {
+      id: "inbox-7",
+      userId: "u-pm",
+      taskId: "task-marketing-strategy",
+      componentType: "DECISION",
+      eventType: "APPROVAL_REQUESTED",
+      title: "승인 요청 전송됨",
+      message: "관리자님에게 승인 요청을 보냈습니다.",
+      readAt: null,
+      ackAt: null,
+      remindCount: 2,
+      sourceUserId: "u-admin",
+      createdAt: iso(2)
+    },
+    {
+      id: "inbox-8",
+      userId: "u-marketing",
+      taskId: "task-marketing-strategy",
+      componentType: "DISCUSSION",
+      eventType: "MENTION",
+      title: "합의 요청 멘션 전송됨",
+      message: "합의 라인 확인을 위해 멘션했습니다.",
+      readAt: iso(1),
+      ackAt: null,
+      remindCount: 1,
+      sourceUserId: "u-admin",
+      mentionCommentId: "comment-seed-admin-2",
+      createdAt: iso(2)
+    },
+    {
+      id: "inbox-9",
+      userId: "u-lead",
+      taskId: "task-phase-1",
+      componentType: "RESULT",
+      eventType: "STATE_TRANSITION",
+      title: "후속 액션 열람 대기",
+      message: "결정 후속 태스크 착수 요청이 전달되었는지 열람 확인이 필요합니다.",
+      readAt: iso(3),
+      ackAt: iso(2),
+      remindCount: 0,
+      sourceUserId: "u-admin",
+      createdAt: iso(4)
     }
   ];
+
+  const notificationSettings: NotificationSettings[] = members.map((member) => ({
+    userId: member.id,
+    emailEnabled: false,
+    pushEnabled: true,
+    digestEnabled: false,
+    mutedComponents: [],
+    mentionOnlyForWatchers: false,
+    slaHours: 24
+  }));
 
   const engagement: EngagementEvent[] = [
     { id: "eng-1", type: "NODE_CREATED", actorId: "u-pm", taskId: "task-marketing-strategy", metadata: { structureState: "TEMPLATED" }, createdAt: iso(240) },
@@ -730,14 +1042,20 @@ export function createSeedData(): AppData {
     me: members[2],
     members,
     units,
+    unitMembers,
     folders,
     lists,
+    buckets,
     tasks,
+    attachments,
     notes,
     comments,
     timeline,
     inbox,
+    notificationSettings,
     templates,
+    workflowStatuses: DEFAULT_WORKFLOW_STATUSES,
+    approvalPolicies,
     engagement,
     analytics
   };
