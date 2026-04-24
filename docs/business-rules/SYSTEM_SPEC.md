@@ -1,141 +1,160 @@
-# 시스템 스펙 (비즈니스 룰 영향 관점)
+# System Spec
 
-## 문서 목적
+이 문서는 `BUSINESS_RULES.md`가 실제 시스템 요구사항으로 내려오는 방식을 정리합니다. 최신 구현 기준은 `apps/api`, `apps/web`, `packages/shared`의 타입과 라우트입니다.
 
-이 문서는 `BUSINESS_RULES.md`의 규칙이 시스템 구현에 어떤 요구사항으로 내려오는지 정리합니다.  
-즉, "비즈니스 룰 -> 시스템 동작" 매핑 문서입니다.
+## Release 문서
 
-## 릴리즈 스코프 문서
+- `system-spec/RELEASE_1_SPEC.md`: 인증, 권한, 기본 CRUD, 가시성
+- `system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
+- `system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 버킷, 템플릿
+- `system-spec/RELEASE_4_SPEC.md`: 승인 정책, 알림, 분석, 운영 관리
 
-릴리즈 단위 상세 스펙은 아래 하위 문서를 사용합니다.
+## 1. 인증/인가
 
-- `system-spec/RELEASE_1_SPEC.md`
-- `system-spec/RELEASE_2_SPEC.md`
-- `system-spec/RELEASE_3_SPEC.md`
-- `system-spec/RELEASE_4_SPEC.md`
+입력은 데모 헤더 `X-Demo-User-Id`입니다.
 
-## 1) 인증/인가 스펙
+시스템 요구사항:
 
-### 입력
+- `/health`를 제외한 API는 사용자 컨텍스트를 확인합니다.
+- 사용자 식별 실패 시 `401 UNAUTHORIZED`를 반환합니다.
+- 역할 미달 시 `403 FORBIDDEN`을 반환합니다.
+- 역할 비교는 `MEMBER < OWNER < ADMIN < SUPER_ADMIN` 순서를 사용합니다.
 
-- 요청 헤더 `X-Demo-User-Id`
+영향 영역:
 
-### 시스템 요구사항
+- API 전역 미들웨어
+- 관리자 화면과 설정 화면
+- 프론트 권한 부족 안내
 
-- 사용자 식별 실패 시 `401 UNAUTHORIZED`
-- 역할 미달 시 `403 FORBIDDEN`
-- 역할 비교는 계층 기반(`VIEWER < EDITOR < APPROVER < ADMIN`)
+## 2. 리소스 가시성
 
-### 영향받는 영역
+시스템 요구사항:
 
-- API 전 엔드포인트(예외: `/health`)
-- 프론트 에러 처리 문구(`권한 부족`)
+- 요청 사용자의 `visibleTaskIds`를 계산합니다.
+- 관리자 역할은 전체 태스크를 볼 수 있습니다.
+- 일반 사용자는 owner/assignee/watcher 관계와 parent chain을 볼 수 있습니다.
+- 가시 범위 밖 태스크 접근은 `403 FORBIDDEN`입니다.
 
-## 2) 리소스 가시성 스펙
+영향 영역:
 
-### 시스템 요구사항
+- 태스크 상세
+- 노트/댓글 조회와 작성
+- 멘션 검증
+- Inbox/타임라인 노출
 
-- 태스크 접근 전 `visibleTaskIds` 계산
-- 가시 범위 밖 태스크 접근 시 `403 FORBIDDEN`
-- 교차 참조 검증은 가시 범위를 기준으로 판단
+## 3. unit/folder/list 무결성
 
-### 영향받는 기능
+시스템 요구사항:
 
-- 태스크 상세 조회
-- 노트 참조 검증
-- 멘션 대상 검증
-- Inbox/타임라인 노출 범위
+- `unitId`, `folderId`, `listId`는 실제 존재해야 합니다.
+- `folderId`와 `listId`는 같은 단위/컨텍스트에 속해야 합니다.
+- 불일치 요청은 저장 전에 `400 FOLDER_LIST_MISMATCH`로 차단합니다.
 
-## 3) 태스크 무결성 스펙(unit/folder/list)
+영향 영역:
 
-### 시스템 요구사항
+- 태스크 생성/수정
+- 리스트 이동
+- 워크스페이스 탐색 필터
 
-- 태스크 생성/수정 시 아래를 검증해야 함:
-  - `unitId`가 유효한지
-  - `listId`가 해당 `unitId`에 속하는지
-  - `folderId`가 해당 `unitId`에 속하는지
-  - `folderId`와 `listId` 조합이 일치하는지
-- 조합 불일치 시 `400 FOLDER_LIST_MISMATCH`
+## 4. Work Graph와 템플릿
 
-### 영향받는 기능
+시스템 요구사항:
 
-- 태스크 생성
-- 태스크 수정(이동 포함)
-- 워크스페이스 필터/탐색 신뢰도
+- `templateId`와 `templateType`은 nullable입니다.
+- 태스크는 `FREEFORM`과 `TEMPLATED` 상태를 모두 지원합니다.
+- 템플릿 적용 시 `formValues`를 `formDefinition.fields` 기준으로 초기화합니다.
+- Form Output 저장은 템플릿 필드 정의와 호환되어야 합니다.
 
-## 4) 노트/댓글/멘션 스펙
+영향 영역:
 
-### 시스템 요구사항
+- `/api/tasks`
+- `/api/templates`
+- 태스크 상세 Form Output
+- 결정 그래프 뷰
 
-- 댓글 생성/수정 시:
-  - `referencedNoteIds` 유효성 검증
-  - `mentions` 유효성 검증
-- `FORM_FIELD` 멘션은 대상 태스크의 `fieldKey` 존재 여부까지 검증
+## 5. 협업과 멘션
 
-### 오류 규약
+시스템 요구사항:
 
-- 노트 참조 실패: `400 INVALID_NOTE_REFERENCE`
-- 멘션 실패: `400 INVALID_MENTION`
+- 댓글 작성/수정 시 `referencedNoteIds`를 검증합니다.
+- 댓글 작성/수정 시 `mentions`를 검증합니다.
+- `FORM_FIELD` 멘션은 대상 태스크와 필드 키 존재를 확인합니다.
+- 유효하지 않은 참조는 `INVALID_NOTE_REFERENCE` 또는 `INVALID_MENTION`으로 실패합니다.
 
-### 영향받는 기능
+영향 영역:
 
-- 협업 스레드 신뢰성
-- 알림 품질(의미 없는 멘션 방지)
+- 우측 스레드 탭
+- 커맨드형 `@`/`#` composer
+- 알림 라우팅
 
-## 5) 상태 전이/결정 스펙
+## 6. 상태 전이와 결정
 
-### 시스템 요구사항
+시스템 요구사항:
 
-- 전이 요청에 `reason` 필수
-- 결정 이벤트는 `timeline`에 기록
-- 이해관계자 대상으로 Inbox 라우팅 수행
+- 전이 요청은 `reason`을 필수로 받습니다.
+- `TaskState`는 `DRAFT`, `IN_PROGRESS`, `DONE`, `CANCELED`입니다.
+- 승인 대기 등 세부 단계는 `WorkflowStatusCategory`로 표현합니다.
+- 전이 결과는 타임라인 이벤트와 Inbox 항목을 생성합니다.
 
-### 영향받는 기능
+영향 영역:
 
-- 승인/반려/보완 프로세스
-- 결정 이력 추적
-- 재방문 트리거
+- `/api/tasks/:taskId/transition`
+- 우측 타임라인 탭
+- 승인/반려/보완 UX
 
-## 6) 이벤트/분석 스펙
+## 7. 뷰와 버킷
 
-### 시스템 요구사항
+시스템 요구사항:
 
-- 주요 행동은 `engagement` 이벤트로 축적
-- 분석 API는 저장된 이벤트/콘텐츠를 기반으로 계산
+- 태스크 화면은 리스트, 보드, 백로그, 결정 그래프 뷰를 제공합니다.
+- 기존 계층 화면과 결정 그래프는 별도 1차 메뉴가 아니라 태스크 뷰 탭으로 제공합니다.
+- 버킷은 `/api/buckets`와 `Task.bucketId`로 관리합니다.
+- 버킷 삭제는 태스크를 삭제하지 않고 버킷 연결만 해제합니다.
 
-### 영향받는 기능
+영향 영역:
+
+- `/tasks?view=list|board|backlog|graph`
+- 버킷 관리 UI
+- 결정 그래프 표시 레이어
+
+## 8. 알림과 Inbox
+
+시스템 요구사항:
+
+- Inbox 항목은 읽음, 확인, 리마인드, 전체 읽음 처리를 지원합니다.
+- 알림 설정은 채널과 컴포넌트별 토글을 저장합니다.
+- Push subscription은 등록/해제를 지원합니다.
+
+영향 영역:
+
+- `/api/inbox`
+- `/api/settings/notifications`
+- `/api/push/subscriptions`
+
+## 9. 분석
+
+시스템 요구사항:
+
+- `/api/analytics/retention`은 현재 데이터와 engagement event를 기반으로 계산합니다.
+- Objective 1/KR 1.1 지표를 분석 화면에서 노출합니다.
+- 고정 더미값이 아니라 이벤트 로그 기반 값을 우선합니다.
+
+영향 영역:
 
 - 관리자 분석 화면
-- 리텐션 지표
-- 협업 활성도 관찰
+- unmet needs/retention 판정 카드
+- 릴리즈 회귀 테스트
 
-## 7) 에러/응답 스펙
+## 10. 에러와 테스트
 
-### 공통 응답 원칙
+공통 에러 응답은 `error`와 `requestId`를 포함합니다. Zod 검증 실패는 `VALIDATION_ERROR`와 `issues`를 반환합니다.
 
-- 에러 응답에 `error`, `requestId` 포함
-- Zod 검증 실패는 `VALIDATION_ERROR` + `issues` 반환
-
-### 영향받는 기능
-
-- 프론트 사용자 메시지 변환
-- 운영 로그 상관관계 추적
-
-## 8) 테스트 스펙(필수 회귀)
-
-아래 항목은 회귀 테스트로 항상 보호해야 합니다.
+필수 회귀:
 
 - 인증 실패/권한 부족
-- IDOR(가시성 밖 리소스 접근)
+- 가시성 밖 리소스 접근
+- folder/list 무결성
 - 노트 참조/멘션 검증
-- folder-list 무결성
-- 전이 및 CRUD 핵심 경로
-
-## 룰 변경 시 필수 점검표
-
-비즈니스 룰이 변경되면 아래를 함께 수정해야 합니다.
-
-1. 서버 검증 로직(`access`, `server` 레이어)
-2. API 스펙 문서(`docs/API_SPEC.md`)
-3. 회귀 테스트(`apps/api/src/security.test.ts`)
-4. 프론트 안내 문구/제어(버튼 노출, 에러 메시지)
+- 템플릿 적용
+- 전이/Inbox 라우팅
+- 분석 지표 계산

@@ -1,26 +1,30 @@
-# Release 3 시스템 스펙
+# Release 3 Spec
 
 ## 목표
 
-워크스페이스 맥락을 강화해 "데이터 정합성"을 안정화합니다.  
-핵심은 `unit/folder/list` 무결성과 탐색 신뢰도입니다.
+Objective 1/KR 1.1의 "형상화 -> 정형화 -> 멘션" 루프를 태스크 운영 화면 안에서 구현합니다.
 
 ## 범위
 
-- 유닛/폴더/리스트 조회/생성 API
-- 태스크의 `unitId`, `folderId`, `listId` 관리
-- 폴더-리스트 조합 무결성 검증
-- 태스크 이동/패치 시 컨텍스트 정합성 유지
+- 자유 노드 생성과 parent 연결
+- `FREEFORM`/`TEMPLATED` 구조 상태
+- 템플릿 적용과 Form Output 활성화
+- unit/folder/list 무결성
+- 버킷 운영 축
+- 리스트/보드/백로그/결정 그래프 뷰 탭
 
-## 필수 시스템 요구사항
+## 시스템 요구사항
 
-1. `listId`는 해당 `unitId` 소속이어야 함
-2. `folderId`는 해당 `unitId` 소속이어야 함
-3. `folderId`와 `listId` 불일치 시 `FOLDER_LIST_MISMATCH`
-4. 무결성 실패 요청은 저장 전에 차단
+1. `templateType`과 `templateId`는 nullable이어야 합니다.
+2. FREEFORM 태스크는 템플릿 없이 생성/수정/parent 연결이 가능해야 합니다.
+3. 템플릿 적용 시 `structureState=TEMPLATED`가 되고 `formValues`가 필드 키 기준으로 초기화됩니다.
+4. `unitId`, `folderId`, `listId` 조합은 생성/수정 시 항상 검증합니다.
+5. 버킷은 `/api/buckets`와 `Task.bucketId`로 관리하며 상태 전이와 분리합니다.
+6. 계층과 결정 그래프는 별도 메뉴가 아니라 태스크 뷰 탭으로 제공됩니다.
 
 ## 수용 기준
 
-- 잘못된 folder/list 조합 생성 요청이 실패한다.
-- 태스크 수정 시도에서도 동일한 무결성 규칙이 적용된다.
-- 워크스페이스 필터 결과가 컨텍스트와 일관된다.
+- 사용자가 자유 노드를 만들고 상위 노드에 연결할 수 있습니다.
+- 반복/규칙이 필요한 노드에 템플릿을 적용해 Form Output을 활성화할 수 있습니다.
+- 리스트, 보드, 백로그, 결정 그래프 탭 전환 시 같은 태스크 데이터를 다른 방식으로 볼 수 있습니다.
+- 잘못된 folder/list 조합은 저장 전에 실패합니다.

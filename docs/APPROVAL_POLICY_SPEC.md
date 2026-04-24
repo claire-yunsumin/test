@@ -1,54 +1,61 @@
-# 승인정책 스캐폴드
+# 승인정책 스펙
 
 ## 목적
 
-승인 요청 시점에 어떤 정책(합의자/결재자/병렬결재)을 적용할지 사전 정의하고,  
-전이 API에서 해당 정책을 옵션으로 연결할 수 있도록 하는 기본 스캐폴드입니다.
+승인 요청이나 결정 전이 시 어떤 승인자/합의자/최종결정권자를 사용할지 정의합니다. 현재 구현은 정책 저장, 유효성 검증, 전이 시 Inbox 수신자 계산까지 포함합니다.
 
-## 스키마 초안
+## ApprovalPolicy
 
-`ApprovalPolicy`
-
-- `id`: 정책 ID
-- `name`: 정책 이름
-- `description?`: 정책 설명
-- `enabled`: 사용 여부
+- `id`
+- `name`
+- `unitId?`: null이면 전역 정책, 값이 있으면 특정 unit 정책
+- `description?`
+- `enabled`
 - `mode`: `SINGLE | PARALLEL | CONSENSUS`
 - `approverType`: `ROLE | MEMBER`
-- `approverRole?`: 역할 기반 승인자일 때 사용
-- `approverIds?`: 멤버 기반 승인자 목록
-- `minApprovals`: 최소 승인 수(병렬/합의 시 활용)
-- `approvalLines?`: 결재라인 배열
-  - `type`: `CONSENSUS | APPROVAL` (UI 셀렉트박스: 합의/승인)
-  - `participantIds`: 라인 참여자(복수 선택)
-  - `minApprovals`: 라인 최소 승인 수
-- `finalApproverId?`: 최종결정권자(합의 라인과 동일 사용자 중복 지정 가능)
-- `createdAt`, `updatedAt`
+- `approverRole?`: 역할 기반 승인자
+- `approverIds?`: 멤버 기반 승인자
+- `minApprovals`
+- `approvalLines?`
+- `finalApproverId?`
+- `createdAt`
+- `updatedAt`
 
-## API 초안
+## ApprovalLine
+
+- `id`
+- `type`: `CONSENSUS | APPROVAL`
+- `participantIds`
+- `minApprovals`
+
+## API
 
 - `GET /api/admin/approval-policies`
 - `POST /api/admin/approval-policies`
 - `PATCH /api/admin/approval-policies/:policyId`
 
-관리자 전용 API이며, 정책 생성/수정 시 승인자 유효성 검증을 수행합니다.
-결재라인 참여자와 최종결정권자 모두 멤버 유효성 검증을 수행합니다.
+정책 생성/수정은 `ADMIN` 이상 권한이 필요합니다.
 
-## 전이 API 연결
+## 전이 연동
 
-`POST /api/tasks/:taskId/transition` body 옵션:
-
-- `approvalPolicyId?`
+`POST /api/tasks/:taskId/transition`은 `approvalPolicyId`를 받을 수 있습니다.
 
 동작:
 
-1. `approvalPolicyId`가 주어지면 정책 유효성 확인
-2. 태스크의 `approvalPolicyId`에 반영
-3. 전이 이벤트 payload에 `approvalPolicyId`, `approvalMode` 기록
-4. `PENDING_APPROVAL` 전이 시 정책 기반 승인자 집합으로 Inbox 라우팅
+1. 정책이 enabled인지 확인합니다.
+2. 정책의 `unitId`가 task unit과 맞는지 확인합니다.
+3. task의 `approvalPolicyId`를 갱신합니다.
+4. 전이 payload에 policy 정보를 남깁니다.
+5. 승인 요청 성격의 전이에서는 policy 기반 수신자에게 Inbox를 생성합니다.
 
-## 기본 해석 규칙
+## 승인자 계산 우선순위
 
-- 정책 미지정 시 기존 fallback(역할 기반 APPROVER/ADMIN)
-- 정책 지정 시 해당 정책의 승인자 규칙 우선
-- 향후 `minApprovals` 기반 다단계 승인 확장 예정
+1. `approvalLines` 참여자와 `finalApproverId`
+2. `approverType=MEMBER`의 `approverIds`
+3. `approverType=ROLE`의 `approverRole`
+4. fallback: `OWNER`, `ADMIN`, `SUPER_ADMIN`
+
+## 현재 한계
+
+- `minApprovals`는 수신자 계산과 정책 표현에 반영되지만, 다중 승인 완료 상태를 누적 저장하는 별도 approval run 모델은 아직 없습니다.
+- 향후 `ApprovalRun`, `ApprovalDecision` 테이블/스토어가 필요합니다.

@@ -1,61 +1,45 @@
-# 문서 인덱스 (학습 순서 가이드)
+# 문서 인덱스
 
-이 폴더 문서는 "전체 구조 이해 -> API 이해 -> 데이터 흐름 이해 -> 룰/스펙 이해" 순서로 보면 가장 빠르게 익힐 수 있습니다.
+이 폴더는 현재 구현된 SelvasIn4 HWE 데모 앱의 코드 기준 문서입니다. 원격은 `git pull` 기준 최신 상태이며, 문서는 `apps/web`, `apps/api`, `packages/shared` 구현을 기준으로 정리합니다.
 
-## 1) 먼저 읽기 (큰 그림)
+## 먼저 읽기
 
-- `ARCHITECTURE.md`  
-  시스템 구조, 경계, 진화 방향
-- `BACKEND.md`  
-  백엔드 핵심 책임과 처리 흐름
-- `FRONTEND.md`  
-  프론트 화면 구성과 상태 흐름
+- `ARCHITECTURE.md`: 모노레포 구조, 프론트/백/공유 패키지 경계, 현재 한계
+- `FRONTEND.md`: 화면 구성, 태스크 뷰 탭, 상세 우측 패널, 공통 UI 컴포넌트
+- `BACKEND.md`: Express API, 인메모리 스토어, 권한/검증/이벤트 처리
+- `API_SPEC.md`: 현재 등록된 API 엔드포인트와 요청/응답 규칙
 
-## 2) API 이해
+## 데이터 생애주기
 
-- `API_SPEC.md`  
-  엔드포인트, 호출 규칙, 메서드 용어/비교표
-- `APPROVAL_POLICY_SPEC.md`  
-  승인정책 스키마/API/전이 연동 스캐폴드
+- `TASK_LIFECYCLE.md`: 태스크 생성, 형상화/정형화, 수정, 전이, 삭제
+- `TIMELINE_LIFECYCLE.md`: 타임라인 이벤트 생성과 상세 우측 탭 표현
+- `INBOX_LIFECYCLE.md`: Inbox 생성, 분류, 읽음/확인/리마인드 처리
+- `DECISION_GRAPH_LIFECYCLE.md`: 태스크 뷰의 그래프 탭과 `/graph` 투영 방식
+- `AUTH_VISIBILITY_LIFECYCLE.md`: 데모 인증, 역할, 리소스 가시성, 멘션/노트 참조 검증
 
-## 3) 데이터 흐름 학습 트랙 (생애주기)
+## 정책과 운영
 
-- `TASK_LIFECYCLE.md`  
-  태스크 생성부터 종료/삭제까지
-- `TIMELINE_LIFECYCLE.md`  
-  타임라인 데이터 생성/저장/표현
-- `INBOX_LIFECYCLE.md`  
-  Inbox 라우팅/표시/읽음 토글
-- `DECISION_GRAPH_LIFECYCLE.md`  
-  그래프 데이터 조합/시각화 흐름
-- `AUTH_VISIBILITY_LIFECYCLE.md`  
-  인증/권한/가시성 검증 흐름
+- `APPROVAL_POLICY_SPEC.md`: 승인정책, 승인 라인, 전이 연동
+- `BUCKET_GUIDE.md`: 버킷 생성/정렬/그룹 운영 방식
+- `ACTION_FLOWS.md`: Hook 루프, 스레드/노트/타임라인/그래프 흐름
 
-## 4) 비즈니스 룰/시스템 스펙
+## 비즈니스 룰
 
-- `business-rules/BUSINESS_RULES.md`  
-  제품 운영 기준이 되는 비즈니스 규칙
-- `business-rules/SYSTEM_SPEC.md`  
-  룰이 시스템 요구사항으로 내려오는 매핑
-- `business-rules/system-spec/RELEASE_1_SPEC.md`
-- `business-rules/system-spec/RELEASE_2_SPEC.md`
-- `business-rules/system-spec/RELEASE_3_SPEC.md`
-- `business-rules/system-spec/RELEASE_4_SPEC.md`
+- `business-rules/BUSINESS_RULES.md`: 제품 운영 기준
+- `business-rules/SYSTEM_SPEC.md`: 비즈니스 룰을 시스템 요구사항으로 매핑
+- `business-rules/system-spec/RELEASE_1_SPEC.md`: 인증/CRUD/가시성
+- `business-rules/system-spec/RELEASE_2_SPEC.md`: 협업/멘션/Inbox/전이
+- `business-rules/system-spec/RELEASE_3_SPEC.md`: unit/folder/list/bucket/workflow
+- `business-rules/system-spec/RELEASE_4_SPEC.md`: 분석/알림/관리/운영 안정화
 
-## 5) 액션 모델
+## 현재 구현 핵심
 
-- `ACTION_FLOWS.md`  
-  Hook 루프, 의사결정 액션 플로우, 그래프 레이어
-- `BUCKET_GUIDE.md`  
-  버킷 생성/배치/일일 운영/정리 시나리오 가이드
-
----
-
-## 추천 학습 순서 (비개발자 기준)
-
-1. `ARCHITECTURE.md`
-2. `API_SPEC.md`
-3. `TASK_LIFECYCLE.md`
-4. `TIMELINE_LIFECYCLE.md` + `INBOX_LIFECYCLE.md`
-5. `DECISION_GRAPH_LIFECYCLE.md`
-6. `BUSINESS_RULES.md` -> `SYSTEM_SPEC.md` -> Release 스펙
+- 인증은 `X-Demo-User-Id` 헤더 기반입니다.
+- 역할은 `MEMBER < OWNER < ADMIN < SUPER_ADMIN` 순서입니다.
+- 태스크는 `unitId`, `folderId`, `listId`, `bucketId`, `parentId`를 가집니다.
+- Work Graph는 `FREEFORM` 형상화와 `TEMPLATED` 정형화를 구분합니다.
+- Template은 `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema`를 가집니다.
+- 스레드는 입력 중 `@` 또는 `#` 커맨드 검색으로 멘션/노트 참조를 선택합니다.
+- 태스크 상세 우측 영역은 `스레드`와 `타임라인` 탭으로 전환됩니다.
+- 태스크 메뉴의 뷰는 `리스트`, `보드`, `백로그`, `결정 그래프`로 통합되어 있습니다.
+- Analytics는 `engagement` 이벤트와 현재 콘텐츠 상태를 기반으로 계산합니다.
