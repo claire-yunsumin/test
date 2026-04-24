@@ -133,6 +133,62 @@ function densitySignal(task: TaskView) {
   return task.activity.notesCount + task.activity.commentsCount + task.activity.filesCount;
 }
 
+type TaskViewMode = "list" | "table" | "board" | "backlog" | "hierarchy" | "graph";
+
+function taskViewTabs(tasks: TaskView[]) {
+  const backlogCount = tasks.filter((task) => task.currentState === "DRAFT").length;
+  return [
+    { value: "list", label: "리스트", count: tasks.length },
+    { value: "table", label: "테이블" },
+    { value: "board", label: "보드" },
+    { value: "backlog", label: "백로그", count: backlogCount },
+    { value: "hierarchy", label: "계층" },
+    { value: "graph", label: "결정 그래프" }
+  ] as Array<{ value: TaskViewMode; label: string; count?: number }>;
+}
+
+function goTaskViewTab(value: TaskViewMode) {
+  if (value === "hierarchy") {
+    go("/hierarchy");
+    return;
+  }
+  if (value === "graph") {
+    go("/graph");
+    return;
+  }
+  if (value === "list") {
+    go("/tasks");
+    return;
+  }
+  go(`/tasks?view=${value}`);
+}
+
+function TaskViewTabs({
+  value,
+  tasks,
+  onChange
+}: {
+  value: TaskViewMode;
+  tasks: TaskView[];
+  onChange?: (value: TaskViewMode) => void;
+}) {
+  return (
+    <div className="tabs-section">
+      <small className="tabs-section-label">뷰</small>
+      <Tabs
+        variant="segmented"
+        value={value}
+        onChange={(next) => {
+          const tab = next as TaskViewMode;
+          onChange?.(tab);
+          goTaskViewTab(tab);
+        }}
+        tabs={taskViewTabs(tasks)}
+      />
+    </div>
+  );
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => currentRoute());
   const [data, setData] = useState<AppData | null>(null);
@@ -400,6 +456,7 @@ function HierarchyView({ data, onReload }: { data: AppData; onReload: () => Prom
         title="결정 대상 구조"
         action={<button className="button primary" onClick={() => go("/tasks")}>새 태스크</button>}
       />
+      <TaskViewTabs value="hierarchy" tasks={tasks} />
       <FilterShell
         meta={<span>{filteredIds.size} visible · {tasks.length} total</span>}
         action={<button className="button secondary" onClick={() => { setSearch(""); setType("ALL"); setState("ALL"); setAssignee("ALL"); }}>필터 초기화</button>}
@@ -586,6 +643,7 @@ function DecisionGraphView({ data }: { data: AppData }) {
         title="조직 결정 자산 지도"
         action={<button className="button secondary" onClick={() => go("/hierarchy")}>계층 보기</button>}
       />
+      <TaskViewTabs value="graph" tasks={tasks} />
       <div className="toolbar graph-toolbar">
         <Select label="Focus" tone="filter" value={focusId} onChange={setFocusId} options={[["ALL", "전체 그래프"], ...orderedTasks.map((task) => [task.id, task.title] as [string, string])]} />
         <button className={`button ${layers.has("context") ? "primary" : "secondary"}`} onClick={() => toggleLayer("context")}>맥락</button>
@@ -1796,6 +1854,8 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
   const initialFilterType = searchParams.get("type");
   const initialQuery = searchParams.get("q");
   const initialQuickFilter = searchParams.get("qf");
+  const initialAdvancedFilter = searchParams.get("af");
+  const initialTableColumns = searchParams.get("tc");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
   const [templateType, setTemplateType] = useState<TemplateType>("TASK");
@@ -1809,14 +1869,29 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
   const [sortBy, setSortBy] = useState(() =>
     initialSortBy && ["manual", "updated", "due", "priority"].includes(initialSortBy) ? initialSortBy : "manual"
   );
-  const [viewMode, setViewMode] = useState<"list" | "board" | "backlog" | "hierarchy" | "graph">(() =>
-    initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "hierarchy" || initialViewMode === "graph" ? initialViewMode : "list"
+  const [viewMode, setViewMode] = useState<TaskViewMode>(() =>
+    initialViewMode === "table" || initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "hierarchy" || initialViewMode === "graph" ? initialViewMode : "list"
   );
   const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee">(() =>
     initialGroupBy === "state" || initialGroupBy === "assignee" ? initialGroupBy : "none"
   );
   const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">(() =>
     initialQuickFilter === "mine" || initialQuickFilter === "pending" || initialQuickFilter === "due-today" ? initialQuickFilter : "all"
+  );
+  const [tableColumns, setTableColumns] = useState(() => {
+    const stored = window.localStorage.getItem("task-table-columns");
+    const source = initialTableColumns ?? stored;
+    if (!source) return { assignee: true, dueDate: true, updatedAt: true, priority: true };
+    const keys = new Set(source.split(",").filter(Boolean));
+    return {
+      assignee: keys.has("assignee"),
+      dueDate: keys.has("dueDate"),
+      updatedAt: keys.has("updatedAt"),
+      priority: keys.has("priority")
+    };
+  });
+  const [advancedFilterOpen, setAdvancedFilterOpen] = useState(() =>
+    initialAdvancedFilter === "1" || Boolean(initialQuery || initialFilterState || initialFilterType || initialSortBy || initialGroupBy || initialQuickFilter)
   );
   const meId = me.id;
 
@@ -1841,8 +1916,18 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
     else url.searchParams.set("type", filterType);
     if (!query.trim()) url.searchParams.delete("q");
     else url.searchParams.set("q", query.trim());
+    if (advancedFilterOpen) url.searchParams.set("af", "1");
+    else url.searchParams.delete("af");
+    const activeColumns = (Object.entries(tableColumns).filter(([, enabled]) => enabled).map(([key]) => key) as Array<keyof typeof tableColumns>).join(",");
+    if (activeColumns === "assignee,dueDate,updatedAt,priority") url.searchParams.delete("tc");
+    else url.searchParams.set("tc", activeColumns);
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-  }, [filterState, filterType, groupBy, query, sortBy, viewMode]);
+  }, [advancedFilterOpen, filterState, filterType, groupBy, query, sortBy, tableColumns, viewMode]);
+
+  useEffect(() => {
+    const activeColumns = (Object.entries(tableColumns).filter(([, enabled]) => enabled).map(([key]) => key) as Array<keyof typeof tableColumns>).join(",");
+    window.localStorage.setItem("task-table-columns", activeColumns);
+  }, [tableColumns]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -1885,6 +1970,18 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
     await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
     await onReload();
   };
+  const quickFilterLabel: Record<typeof quickFilter, string> = {
+    all: "전체",
+    mine: "내 할 일",
+    pending: "승인 대기",
+    "due-today": "오늘 기한"
+  };
+  const filterSummary = [
+    quickFilter !== "all" ? `빠른필터 ${quickFilterLabel[quickFilter]}` : null,
+    filterState !== "ALL" ? `상태 ${STATE_META[filterState].label}` : null,
+    filterType !== "ALL" ? `유형 ${TEMPLATE_META[filterType].label}` : null,
+    query.trim() ? `검색 '${query.trim()}'` : null
+  ].filter(Boolean).join(" · ");
 
   return (
     <section className="page-stack">
@@ -1898,63 +1995,79 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
           </article>
         ))}
       </div>
-      <Tabs
-        variant="segmented"
-        value={viewMode}
-        onChange={(value) => {
-          const next = value as typeof viewMode;
-          setViewMode(next);
-          if (next === "hierarchy") go("/hierarchy");
-          if (next === "graph") go("/graph");
-        }}
-        tabs={[
-          { value: "list", label: "List", count: filteredTasks.length },
-          { value: "board", label: "Board" },
-          { value: "backlog", label: "Backlog", count: backlogTasks.length },
-          { value: "hierarchy", label: "계층" },
-          { value: "graph", label: "결정그래프" }
-        ]}
-      />
-      <Tabs
-        variant="segmented"
-        value={quickFilter}
-        onChange={(value) => setQuickFilter(value as typeof quickFilter)}
-        tabs={[
-          { value: "all", label: "전체", count: tasks.length },
-          { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
-          { value: "pending", label: "승인대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
-          { value: "due-today", label: "오늘기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
-        ]}
-      />
+      <section className="tabs-stack">
+        <TaskViewTabs value={viewMode} tasks={tasks} onChange={setViewMode} />
+        <div className="advanced-filter-shell">
+          <div className="advanced-filter-head">
+            <div className="advanced-filter-label">
+              <small className="tabs-section-label">고급 필터</small>
+              <span>{filterSummary || "빠른 필터, 검색, 상태/유형/정렬/그룹을 한 번에 관리합니다."}</span>
+            </div>
+            <button
+              className="filter-toggle-icon"
+              onClick={() => setAdvancedFilterOpen((prev) => !prev)}
+              aria-label={advancedFilterOpen ? "고급 필터 접기" : "고급 필터 펼치기"}
+              title={advancedFilterOpen ? "고급 필터 접기" : "고급 필터 펼치기"}
+            >
+              {advancedFilterOpen ? "−" : "+"}
+            </button>
+          </div>
+          {advancedFilterOpen && (
+            <>
+              <div className="advanced-quick-tabs">
+                <Tabs
+                  variant="segmented"
+                  value={quickFilter}
+                  onChange={(value) => setQuickFilter(value as typeof quickFilter)}
+                  tabs={[
+                    { value: "all", label: "전체", count: tasks.length },
+                    { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
+                    { value: "pending", label: "승인 대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
+                    { value: "due-today", label: "오늘 기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
+                  ]}
+                />
+              </div>
+              <FilterShell
+                meta={<span>{filteredTasks.length}개 표시 · 정렬 {sortBy} · 그룹 {groupBy}</span>}
+                action={<button className="button secondary" onClick={() => { setQuery(""); setFilterState("ALL"); setFilterType("ALL"); setSortBy("manual"); setGroupBy("none"); setQuickFilter("all"); }}>필터 초기화</button>}
+              >
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
+                <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
+                <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
+                <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
+                <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"]]} />
+              </FilterShell>
+            </>
+          )}
+        </div>
+      </section>
       <form className="create-card" onSubmit={create}>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
         <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
         <Select label="상위" value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "상위 항목 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
         <button className="button primary">생성</button>
       </form>
-      <FilterShell
-        meta={<span>{filteredTasks.length} visible · sort {sortBy} · group {groupBy}</span>}
-        action={<button className="button secondary" onClick={() => { setQuery(""); setFilterState("ALL"); setFilterType("ALL"); setSortBy("manual"); setGroupBy("none"); setQuickFilter("all"); }}>필터 초기화</button>}
-      >
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
-        <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
-        <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
-        <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
-        <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"]]} />
-      </FilterShell>
-      {dragDisabled && (
+      {dragDisabled && (viewMode === "list" || viewMode === "table" || viewMode === "backlog") && (
         <div className="sort-banner">
           <strong>정렬/그룹 중</strong>
-          <span>수동 순서 이동은 Sort와 Group이 모두 꺼져 있을 때 활성화됩니다.</span>
-          <button className="button secondary" onClick={() => { setSortBy("manual"); setGroupBy("none"); }}>Clear sort/group</button>
+          <span>수동 순서 이동은 정렬/그룹이 모두 꺼져 있을 때 활성화됩니다.</span>
+          <button className="button secondary" onClick={() => { setSortBy("manual"); setGroupBy("none"); }}>정렬/그룹 해제</button>
         </div>
       )}
       {viewMode === "board" ? (
         <TaskBoardView tasks={filteredTasks} members={members} onPatch={patchTask} />
+      ) : viewMode === "table" ? (
+        <TaskTableView
+          tasks={filteredTasks}
+          members={members}
+          columns={tableColumns}
+          onToggleColumn={(key) => setTableColumns((prev) => ({ ...prev, [key]: !prev[key] }))}
+          onPatch={patchTask}
+        />
       ) : viewMode === "backlog" ? (
         <div className="backlog-layout">
-          <TaskListPanel title="Backlog" tasks={backlogTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
-          <TaskListPanel title="Current Sprint" tasks={sprintTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          <TaskListPanel title="백로그" tasks={backlogTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          <TaskListPanel title="현재 스프린트" tasks={sprintTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
         </div>
       ) : groupBy === "state" ? (
         <div className="grouped-list">
@@ -1969,8 +2082,80 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
           ))}
         </div>
       ) : (
-        <TaskListPanel title="All Tasks" tasks={filteredTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+        <TaskListPanel title="전체 태스크" tasks={filteredTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
       )}
+    </section>
+  );
+}
+
+function TaskTableView({
+  tasks,
+  members,
+  columns,
+  onToggleColumn,
+  onPatch
+}: {
+  tasks: TaskView[];
+  members: Member[];
+  columns: { assignee: boolean; dueDate: boolean; updatedAt: boolean; priority: boolean };
+  onToggleColumn: (key: "assignee" | "dueDate" | "updatedAt" | "priority") => void;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
+}) {
+  const tableGridTemplate = [
+    "minmax(280px, 1.6fr)",
+    "minmax(140px, 0.7fr)",
+    ...(columns.priority ? ["minmax(120px, 0.55fr)"] : []),
+    ...(columns.assignee ? ["minmax(180px, 0.8fr)"] : []),
+    ...(columns.dueDate ? ["minmax(110px, 0.55fr)"] : []),
+    ...(columns.updatedAt ? ["minmax(110px, 0.55fr)"] : [])
+  ].join(" ");
+  return (
+    <section className="task-list-panel table-view-panel">
+      <div className="table-view-toolbar">
+        <strong>테이블 컬럼</strong>
+        <div className="table-column-toggles">
+          <button className={`button ${columns.assignee ? "primary" : "secondary"}`} onClick={() => onToggleColumn("assignee")}>담당자</button>
+          <button className={`button ${columns.dueDate ? "primary" : "secondary"}`} onClick={() => onToggleColumn("dueDate")}>기한</button>
+          <button className={`button ${columns.updatedAt ? "primary" : "secondary"}`} onClick={() => onToggleColumn("updatedAt")}>수정일</button>
+          <button className={`button ${columns.priority ? "primary" : "secondary"}`} onClick={() => onToggleColumn("priority")}>우선순위</button>
+        </div>
+      </div>
+      <div className="task-table table-mode">
+        <div className="task-row table-row table-head" style={{ gridTemplateColumns: tableGridTemplate }}>
+          <span>제목</span>
+          <span>상태</span>
+          {columns.priority && <span>우선순위</span>}
+          {columns.assignee && <span>담당자</span>}
+          {columns.dueDate && <span>기한</span>}
+          {columns.updatedAt && <span>수정일</span>}
+        </div>
+        {tasks.map((task) => (
+          <div className="task-row table-row" key={task.id} style={{ gridTemplateColumns: tableGridTemplate }}>
+            <button className="task-open-cell table-title-cell" onClick={() => go(`/tasks/${task.id}`)}>
+              <strong>{task.title}</strong>
+              <small>{templateLabel(task.templateType)} · {STRUCTURE_META[task.structureState].label}</small>
+            </button>
+            <Select
+              tone="inline"
+              value={task.currentState}
+              onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })}
+              options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])}
+            />
+            {columns.priority && (
+              <Select
+                tone="inline"
+                value={task.priority}
+                onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })}
+                options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
+              />
+            )}
+            {columns.assignee && <span>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</span>}
+            {columns.dueDate && <span>{formatDate(task.dueDate)}</span>}
+            {columns.updatedAt && <span>{formatDate(task.updatedAt)}</span>}
+          </div>
+        ))}
+        {!tasks.length && <div className="empty-row">표시할 태스크가 없습니다.</div>}
+      </div>
     </section>
   );
 }
