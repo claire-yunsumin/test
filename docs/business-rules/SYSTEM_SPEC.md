@@ -4,6 +4,7 @@
 
 ## Release 문서
 
+- `DOMAIN_GLOSSARY.md`: 핵심 도메인 용어 정의
 - `system-spec/RELEASE_1_SPEC.md`: 인증, 권한, 기본 CRUD, 가시성
 - `system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
 - `system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 버킷, 템플릿
