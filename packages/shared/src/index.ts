@@ -1,5 +1,5 @@
 export type TemplateType = "VISION" | "AXIS" | "OBJECTIVE" | "KEYRESULT" | "TASK";
-export type TaskState = "DRAFT" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
+export type TaskState = "DRAFT" | "IN_PROGRESS" | "DONE" | "CANCELED";
 export type WorkflowPhase = "BACKLOG" | "PLAN" | "ACTIVE" | "CLOSED";
 export type WorkflowStatusCategory = "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
@@ -201,10 +201,22 @@ export type NotificationSettings = {
   userId: string;
   emailEnabled: boolean;
   pushEnabled: boolean;
+  webPushEnabled: boolean;
   digestEnabled: boolean;
   mutedComponents: InboxComponent[];
   mentionOnlyForWatchers: boolean;
   slaHours: number;
+};
+
+export type WebPushSubscription = {
+  id: string;
+  userId: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  userAgent?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Template = {
@@ -230,8 +242,13 @@ export type Template = {
       label: string;
       decisionType: DecisionType;
       isDecision: boolean;
-      approvalEnabled?: boolean;
-      approvalPolicyId?: string | null;
+      onEnter?: Record<string, unknown>;
+      onExit?: {
+        approvalGate?: {
+          enabled: boolean;
+          policyId?: string | null;
+        };
+      };
     }>;
   };
 };
@@ -306,6 +323,7 @@ export type AppData = {
   timeline: TimelineEvent[];
   inbox: InboxItem[];
   notificationSettings: NotificationSettings[];
+  webPushSubscriptions: WebPushSubscription[];
   templates: Template[];
   workflowStatuses: WorkflowStatusDefinition[];
   approvalPolicies: ApprovalPolicy[];
@@ -324,7 +342,6 @@ export const TEMPLATE_META: Record<TemplateType, { label: string; tone: string; 
 export const STATE_META: Record<TaskState, { label: string; tone: string }> = {
   DRAFT: { label: "초안", tone: "slate" },
   IN_PROGRESS: { label: "진행 중", tone: "blue" },
-  PENDING_APPROVAL: { label: "승인 대기", tone: "amber" },
   DONE: { label: "완료", tone: "green" },
   CANCELED: { label: "취소됨", tone: "red" }
 };
@@ -346,15 +363,14 @@ const iso = (hoursAgo: number) => new Date(now.getTime() - hoursAgo * 60 * 60 * 
 
 const workflow = (decision = true): Template["workflow"] => [
   { from: "DRAFT", to: "IN_PROGRESS", label: "시작", isDecision: false, decisionType: "STATE_ONLY" },
-  { from: "IN_PROGRESS", to: "PENDING_APPROVAL", label: "검토 요청", isDecision: decision, decisionType: "SUPPLEMENT" },
-  { from: "PENDING_APPROVAL", to: "DONE", label: "승인", isDecision: decision, decisionType: "APPROVE" },
-  { from: "PENDING_APPROVAL", to: "IN_PROGRESS", label: "보완 요청", isDecision: decision, decisionType: "SUPPLEMENT" }
+  { from: "IN_PROGRESS", to: "DONE", label: "승인", isDecision: decision, decisionType: "APPROVE" },
+  { from: "IN_PROGRESS", to: "IN_PROGRESS", label: "보완 요청", isDecision: decision, decisionType: "SUPPLEMENT" },
+  { from: "IN_PROGRESS", to: "CANCELED", label: "반려", isDecision: decision, decisionType: "REJECT" }
 ];
 
 export const DEFAULT_WORKFLOW_STATUSES: WorkflowStatusDefinition[] = [
   { id: "open", name: "Open", category: "OPEN", isDefault: true },
   { id: "in_progress", name: "In Progress", category: "IN_PROGRESS" },
-  { id: "pending_approval", name: "Pending Approval", category: "PENDING_APPROVAL" },
   { id: "done", name: "Done", category: "DONE" },
   { id: "canceled", name: "Canceled", category: "CANCELED" }
 ];
@@ -362,7 +378,6 @@ export const DEFAULT_WORKFLOW_STATUSES: WorkflowStatusDefinition[] = [
 export const LEGACY_STATE_TO_STATUS_ID: Record<TaskState, string> = {
   DRAFT: "open",
   IN_PROGRESS: "in_progress",
-  PENDING_APPROVAL: "pending_approval",
   DONE: "done",
   CANCELED: "canceled"
 };
@@ -566,7 +581,7 @@ export function createSeedData(): AppData {
       structureState: "TEMPLATED",
       templateType: "OBJECTIVE",
       templateId: "tpl-marketing-objective",
-      currentState: "PENDING_APPROVAL",
+      currentState: "IN_PROGRESS",
       priority: "URGENT",
       ownerId: "u-pm",
       assigneeIds: ["u-marketing"],
@@ -878,7 +893,7 @@ export function createSeedData(): AppData {
       decisionType: "SUPPLEMENT",
       reason: "ICP와 메시지 초안이 정리되어 승인권자 검토가 필요합니다.",
       referencedNoteIds: ["note-analysis", "note-decision"],
-      payload: { fromState: "IN_PROGRESS", toState: "PENDING_APPROVAL" },
+      payload: { fromState: "IN_PROGRESS", toState: "IN_PROGRESS", toStatusId: "in_progress" },
       createdAt: iso(1)
     }
   ];
@@ -1018,11 +1033,13 @@ export function createSeedData(): AppData {
     userId: member.id,
     emailEnabled: false,
     pushEnabled: true,
+    webPushEnabled: false,
     digestEnabled: false,
     mutedComponents: [],
     mentionOnlyForWatchers: false,
     slaHours: 24
   }));
+  const webPushSubscriptions: WebPushSubscription[] = [];
 
   const engagement: EngagementEvent[] = [
     { id: "eng-1", type: "NODE_CREATED", actorId: "u-pm", taskId: "task-marketing-strategy", metadata: { structureState: "TEMPLATED" }, createdAt: iso(240) },
@@ -1032,7 +1049,7 @@ export function createSeedData(): AppData {
     { id: "eng-5", type: "MENTION_CREATED", actorId: "u-lead", taskId: "task-marketing-strategy", targetId: "task-marketing-strategy", metadata: { type: "FORM_FIELD" }, createdAt: iso(3) },
     { id: "eng-6", type: "NOTE_UPDATED", actorId: "u-marketing", taskId: "task-marketing-strategy", targetId: "note-analysis", metadata: { afterMention: true }, createdAt: iso(2) },
     { id: "eng-7", type: "NODE_UPDATED", actorId: "u-marketing", taskId: "task-marketing-strategy", metadata: { afterFeedback: true }, createdAt: iso(2) },
-    { id: "eng-8", type: "DECISION_TRANSITION", actorId: "u-marketing", taskId: "task-marketing-strategy", metadata: { toState: "PENDING_APPROVAL" }, createdAt: iso(1) },
+    { id: "eng-8", type: "DECISION_TRANSITION", actorId: "u-marketing", taskId: "task-marketing-strategy", metadata: { toState: "IN_PROGRESS", toStatusId: "in_progress" }, createdAt: iso(1) },
     { id: "eng-9", type: "VOLUNTARY_VISIT", actorId: "u-lead", taskId: "task-marketing-strategy", metadata: { source: "discussion" }, createdAt: iso(1) }
   ];
 
@@ -1053,6 +1070,7 @@ export function createSeedData(): AppData {
     timeline,
     inbox,
     notificationSettings,
+    webPushSubscriptions,
     templates,
     workflowStatuses: DEFAULT_WORKFLOW_STATUSES,
     approvalPolicies,

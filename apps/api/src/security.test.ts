@@ -420,7 +420,7 @@ describe("input validation", () => {
       userId: "u-admin",
       method: "POST",
       body: JSON.stringify({
-        toState: "PENDING_APPROVAL",
+        toState: "IN_PROGRESS",
         decisionType: "SUPPLEMENT",
         reason: "use unit default policy"
       })
@@ -492,8 +492,8 @@ describe("input validation", () => {
           { id: "done", name: "Done", category: "DONE" }
         ],
         transitions: [
-          { fromStatusId: "open", toStatusId: "approve_gate", label: "승인요청", decisionType: "SUPPLEMENT", isDecision: true, approvalEnabled: true, approvalPolicyId: "ap-default-unit-approver" },
-          { fromStatusId: "approve_gate", toStatusId: "done", label: "완료", decisionType: "APPROVE", isDecision: true, approvalEnabled: false, approvalPolicyId: null }
+          { fromStatusId: "open", toStatusId: "approve_gate", label: "승인요청", decisionType: "SUPPLEMENT", isDecision: true, onExit: { approvalGate: { enabled: true, policyId: "ap-default-unit-approver" } } },
+          { fromStatusId: "approve_gate", toStatusId: "done", label: "완료", decisionType: "APPROVE", isDecision: true, onExit: { approvalGate: { enabled: false, policyId: null } } }
         ]
       })
     });
@@ -510,7 +510,7 @@ describe("input validation", () => {
       userId: "u-admin",
       method: "POST",
       body: JSON.stringify({
-        toState: "PENDING_APPROVAL",
+        toState: "IN_PROGRESS",
         toStatusId: "approve_gate",
         decisionType: "SUPPLEMENT",
         reason: "need approval"

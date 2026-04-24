@@ -58,10 +58,9 @@ function approversByPolicy(policy: ApprovalPolicy) {
 function isAllowedTransition(fromState: TaskState, toState: TaskState, decisionType: DecisionType) {
   const rules: Array<{ from: TaskState; to: TaskState; decision: DecisionType }> = [
     { from: "DRAFT", to: "IN_PROGRESS", decision: "STATE_ONLY" },
-    { from: "IN_PROGRESS", to: "PENDING_APPROVAL", decision: "SUPPLEMENT" },
-    { from: "PENDING_APPROVAL", to: "IN_PROGRESS", decision: "SUPPLEMENT" },
-    { from: "PENDING_APPROVAL", to: "CANCELED", decision: "REJECT" },
-    { from: "PENDING_APPROVAL", to: "DONE", decision: "APPROVE" }
+    { from: "IN_PROGRESS", to: "IN_PROGRESS", decision: "SUPPLEMENT" },
+    { from: "IN_PROGRESS", to: "CANCELED", decision: "REJECT" },
+    { from: "IN_PROGRESS", to: "DONE", decision: "APPROVE" }
   ];
   return rules.some((rule) => rule.from === fromState && rule.to === toState && rule.decision === decisionType);
 }
@@ -89,15 +88,31 @@ function statusesForTemplate(template: Template | null) {
 }
 
 function transitionsForTemplate(template: Template | null) {
-  if (template?.workflowSchema?.transitions?.length) return template.workflowSchema.transitions;
+  if (template?.workflowSchema?.transitions?.length) {
+    return template.workflowSchema.transitions.map((row) => ({
+      ...row,
+      onExit: {
+        ...(row.onExit ?? {}),
+        approvalGate: {
+          enabled: row.onExit?.approvalGate?.enabled ?? false,
+          policyId: row.onExit?.approvalGate?.policyId ?? null
+        }
+      }
+    }));
+  }
   return (template?.workflow ?? []).map((rule) => ({
     fromStatusId: LEGACY_STATE_TO_STATUS_ID[rule.from],
     toStatusId: LEGACY_STATE_TO_STATUS_ID[rule.to],
     label: rule.label,
     decisionType: rule.decisionType,
     isDecision: rule.isDecision,
-    approvalEnabled: rule.isDecision,
-    approvalPolicyId: null
+    onEnter: {},
+    onExit: {
+      approvalGate: {
+        enabled: rule.isDecision,
+        policyId: null
+      }
+    }
   }));
 }
 
@@ -111,7 +126,7 @@ function workflowTransitionRule(task: Task, toStatusId: string, decisionType: De
 function isPendingApprovalStatus(task: Task, statusId: string) {
   const template = task.templateId ? byId(data.templates, task.templateId) ?? null : null;
   const status = statusesForTemplate(template).find((row) => row.id === statusId);
-  return status?.category === "PENDING_APPROVAL" || statusId === "pending_approval";
+  return status?.category === "PENDING_APPROVAL";
 }
 
 function notifyMentions(req: express.Request, task: Task, mentions: Mention[], commentId: string) {
@@ -174,7 +189,8 @@ app.get("/api/bootstrap", (req, res) => {
       || item.sourceUserId === user.id
       || user.role === "ADMIN"
     ),
-    notificationSettings: data.notificationSettings.filter((row) => row.userId === user.id)
+    notificationSettings: data.notificationSettings.filter((row) => row.userId === user.id),
+    webPushSubscriptions: data.webPushSubscriptions.filter((row) => row.userId === user.id)
   });
 });
 
@@ -402,7 +418,7 @@ app.post("/api/tasks", (req, res) => {
       templateId: z.string().nullable().optional(),
       templateType: z.enum(templateTypes).nullable().optional(),
       structureState: z.enum(["FREEFORM", "TEMPLATED"]).default("FREEFORM"),
-      currentState: z.enum(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"]).optional(),
+      currentState: z.enum(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"]).optional(),
       workflowPhase: z.enum(["BACKLOG", "PLAN", "ACTIVE", "CLOSED"]).optional(),
       phaseOverride: z.enum(["BACKLOG", "PLAN", "ACTIVE", "CLOSED"]).nullable().optional(),
       workflowStatusId: z.string().optional(),
@@ -536,7 +552,7 @@ app.patch("/api/tasks/:taskId", (req, res) => {
       title: optionalText(120),
       description: optionalText(1200),
       priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
-      currentState: z.enum(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"]).optional(),
+      currentState: z.enum(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"]).optional(),
       workflowStatusId: z.string().optional(),
       workflowPhase: z.enum(["BACKLOG", "PLAN", "ACTIVE", "CLOSED"]).optional(),
       phaseOverride: z.enum(["BACKLOG", "PLAN", "ACTIVE", "CLOSED"]).nullable().optional(),
@@ -693,7 +709,7 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
   if (!task) return;
   const body = z
     .object({
-      toState: z.enum(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"]),
+      toState: z.enum(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"]),
       toStatusId: z.string().optional(),
       decisionType: z.enum(["APPROVE", "REJECT", "SUPPLEMENT", "STATE_ONLY"]),
       reason: text(1, 1200),
@@ -718,8 +734,8 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
     return;
   }
   const unitDefaultPolicyId = byId(data.units, task.unitId)?.defaultApprovalPolicyId ?? undefined;
-  const transitionApprovalEnabled = Boolean(matchedWorkflowTransition?.approvalEnabled);
-  const transitionPolicyId = matchedWorkflowTransition?.approvalPolicyId ?? undefined;
+  const transitionApprovalEnabled = Boolean(matchedWorkflowTransition?.onExit?.approvalGate?.enabled);
+  const transitionPolicyId = matchedWorkflowTransition?.onExit?.approvalGate?.policyId ?? undefined;
   const selectedPolicyId = body.approvalPolicyId !== undefined
     ? (body.approvalPolicyId ?? undefined)
     : (transitionPolicyId ?? task.approvalPolicyId ?? unitDefaultPolicyId ?? undefined);
@@ -1124,6 +1140,7 @@ app.get("/api/settings/notifications", (req, res) => {
     userId: me,
     emailEnabled: false,
     pushEnabled: true,
+    webPushEnabled: false,
     digestEnabled: false,
     mutedComponents: [],
     mentionOnlyForWatchers: false,
@@ -1138,6 +1155,7 @@ app.patch("/api/settings/notifications", (req, res) => {
   const body = z.object({
     emailEnabled: z.boolean().optional(),
     pushEnabled: z.boolean().optional(),
+    webPushEnabled: z.boolean().optional(),
     digestEnabled: z.boolean().optional(),
     mutedComponents: z.array(z.enum(["DECISION", "DISCUSSION", "AWARENESS", "RESULT"])).optional(),
     mentionOnlyForWatchers: z.boolean().optional(),
@@ -1145,16 +1163,66 @@ app.patch("/api/settings/notifications", (req, res) => {
   }).parse(req.body);
   let row = data.notificationSettings.find((item) => item.userId === me);
   if (!row) {
-    row = { userId: me, emailEnabled: false, pushEnabled: true, digestEnabled: false, mutedComponents: [], mentionOnlyForWatchers: false, slaHours: 24 };
+    row = { userId: me, emailEnabled: false, pushEnabled: true, webPushEnabled: false, digestEnabled: false, mutedComponents: [], mentionOnlyForWatchers: false, slaHours: 24 };
     data.notificationSettings.push(row);
   }
   if (body.emailEnabled !== undefined) row.emailEnabled = body.emailEnabled;
   if (body.pushEnabled !== undefined) row.pushEnabled = body.pushEnabled;
+  if (body.webPushEnabled !== undefined) row.webPushEnabled = body.webPushEnabled;
   if (body.digestEnabled !== undefined) row.digestEnabled = body.digestEnabled;
   if (body.mutedComponents !== undefined) row.mutedComponents = body.mutedComponents;
   if (body.mentionOnlyForWatchers !== undefined) row.mentionOnlyForWatchers = body.mentionOnlyForWatchers;
   if (body.slaHours !== undefined) row.slaHours = body.slaHours;
   res.json(row);
+});
+
+app.get("/api/push/subscriptions", (req, res) => {
+  const me = meId(req);
+  res.json(data.webPushSubscriptions.filter((row) => row.userId === me));
+});
+
+app.post("/api/push/subscriptions", (req, res) => {
+  const me = meId(req);
+  const body = z.object({
+    endpoint: z.string().url(),
+    keys: z.object({
+      p256dh: z.string().min(1),
+      auth: z.string().min(1)
+    }),
+    userAgent: z.string().max(300).optional()
+  }).parse(req.body);
+  const existing = data.webPushSubscriptions.find((row) => row.userId === me && row.endpoint === body.endpoint);
+  if (existing) {
+    existing.p256dh = body.keys.p256dh;
+    existing.auth = body.keys.auth;
+    existing.userAgent = body.userAgent;
+    existing.updatedAt = now();
+    return res.json(existing);
+  }
+  const row = {
+    id: `wps-${crypto.randomUUID()}`,
+    userId: me,
+    endpoint: body.endpoint,
+    p256dh: body.keys.p256dh,
+    auth: body.keys.auth,
+    userAgent: body.userAgent,
+    createdAt: now(),
+    updatedAt: now()
+  };
+  data.webPushSubscriptions.unshift(row);
+  res.status(201).json(row);
+});
+
+app.delete("/api/push/subscriptions", (req, res) => {
+  const me = meId(req);
+  const body = z.object({ endpoint: z.string().url().optional() }).parse(req.body ?? {});
+  const before = data.webPushSubscriptions.length;
+  data.webPushSubscriptions = data.webPushSubscriptions.filter((row) => {
+    if (row.userId !== me) return true;
+    if (!body.endpoint) return false;
+    return row.endpoint !== body.endpoint;
+  });
+  res.json({ ok: true, removed: before - data.webPushSubscriptions.length });
 });
 
 app.get("/api/templates", (_req, res) => {
@@ -1252,15 +1320,35 @@ app.patch("/api/templates/:templateId/workflow", (req, res) => {
       label: text(1, 80),
       decisionType: z.enum(["APPROVE", "REJECT", "SUPPLEMENT", "STATE_ONLY"]),
       isDecision: z.boolean(),
-      approvalEnabled: z.boolean().optional(),
-      approvalPolicyId: z.string().nullable().optional()
+      onEnter: z.record(z.any()).optional(),
+      onExit: z.object({
+        approvalGate: z.object({
+          enabled: z.boolean(),
+          policyId: z.string().nullable().optional()
+        }).optional()
+      }).optional()
     })).min(1)
   }).parse(req.body);
-  const allPolicyIds = [...new Set(body.transitions.map((row) => row.approvalPolicyId).filter((id): id is string => Boolean(id)))];
+  const allPolicyIds = [...new Set(body.transitions.flatMap((row) => {
+    const ids: Array<string | null | undefined> = [row.onExit?.approvalGate?.policyId];
+    return ids.filter((id): id is string => Boolean(id));
+  }))];
   if (allPolicyIds.some((id) => !data.approvalPolicies.some((policy) => policy.id === id && policy.enabled))) {
     return res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
   }
-  template.workflowSchema = { statuses: body.statuses, transitions: body.transitions };
+  template.workflowSchema = {
+    statuses: body.statuses,
+    transitions: body.transitions.map((row) => ({
+      ...row,
+      onExit: {
+        ...(row.onExit ?? {}),
+        approvalGate: {
+          enabled: row.onExit?.approvalGate?.enabled ?? false,
+          policyId: row.onExit?.approvalGate?.policyId ?? null
+        }
+      }
+    }))
+  };
   template.workflow = body.transitions.map((row) => ({
     from: stateFromStatusId(row.fromStatusId),
     to: stateFromStatusId(row.toStatusId),

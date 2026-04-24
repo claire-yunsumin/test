@@ -36,7 +36,7 @@ import { currentRoute, go, type Route } from "./lib/router";
 import type { TaskDetail, TaskView } from "./lib/viewTypes";
 
 const templateOrder: TemplateType[] = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"];
-const states: Array<"ALL" | TaskState> = ["ALL", "DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"];
+const states: Array<"ALL" | TaskState> = ["ALL", "DRAFT", "IN_PROGRESS", "DONE", "CANCELED"];
 const templateTypes: Array<"ALL" | TemplateType> = ["ALL", "VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"];
 const roleLabel: Record<Role, string> = {
   VIEWER: "뷰어",
@@ -98,10 +98,7 @@ function formatFailure(cause: string, impact: string, nextAction: string) {
 
 function decisionHint(state: TaskState, canApprove: boolean) {
   if (state === "DRAFT") return "다음 권장 액션: 시작";
-  if (state === "IN_PROGRESS") return "다음 권장 액션: 검토 요청";
-  if (state === "PENDING_APPROVAL") {
-    return canApprove ? "다음 권장 액션: 승인" : "승인자 확인 대기: 승인 권한이 필요합니다";
-  }
+  if (state === "IN_PROGRESS") return canApprove ? "다음 권장 액션: 승인 / 보완 / 반려" : "다음 권장 액션: 진행";
   if (state === "DONE") return "완료 상태입니다";
   return "현재 상태에서는 추가 액션이 제한됩니다";
 }
@@ -115,9 +112,8 @@ type DecisionAction = {
 
 function decisionActions(state: TaskState, canApprove: boolean): DecisionAction[] {
   if (state === "DRAFT") return [{ toState: "IN_PROGRESS", decisionType: "STATE_ONLY", title: "작업 시작", tone: "primary" }];
-  if (state === "IN_PROGRESS") return [{ toState: "PENDING_APPROVAL", decisionType: "SUPPLEMENT", title: "검토 요청", tone: "primary" }];
-  if (state === "PENDING_APPROVAL") {
-    if (!canApprove) return [];
+  if (state === "IN_PROGRESS") {
+    if (!canApprove) return [{ toState: "IN_PROGRESS", decisionType: "SUPPLEMENT", title: "보완 요청", tone: "secondary" }];
     return [
       { toState: "IN_PROGRESS", decisionType: "SUPPLEMENT", title: "보완 요청", tone: "secondary" },
       { toState: "CANCELED", decisionType: "REJECT", title: "반려", tone: "danger" },
@@ -241,7 +237,7 @@ function headerBreadcrumb(route: string, taskId: string | undefined, tasks: Task
       { label: task.title, path: `/tasks/${task.id}` }
     ];
   }
-  if (route === "/tasks" || route === "/hierarchy") return [{ label: "태스크", path: "/tasks" }];
+  if (route === "/tasks") return [{ label: "태스크", path: "/tasks" }];
   if (route === "/graph") return [{ label: "태스크", path: "/tasks" }, { label: "결정 그래프", path: "/graph" }];
   if (route === "/inbox") return [{ label: "알림함", path: "/inbox" }];
   if (route === "/settings/templates" || route === "/templates") return [{ label: "설정", path: "/settings/profile" }, { label: "템플릿 센터", path: "/settings/templates" }];
@@ -352,8 +348,6 @@ export function App() {
         <TaskWorkspace taskId={route.taskId} me={data.me} templates={data.templates} onReload={reload} />
       ) : route.path === "/tasks" ? (
         <TasksView tasks={tasksByContext} members={data.members} buckets={data.buckets} me={data.me} selectedUnitId={selectedUnitId} selectedListId={selectedListId} onReload={reload} />
-      ) : route.path === "/hierarchy" ? (
-        <HierarchyView data={{ ...data, tasks: tasksByContext }} onReload={reload} />
       ) : route.path === "/graph" ? (
         <DecisionGraphView data={{ ...data, tasks: tasksByContext }} />
       ) : route.path === "/inbox" ? (
@@ -506,7 +500,7 @@ function Shell({
           {links.map((link) => (
             <button
               key={link.path}
-              className={`nav-item ${route === link.path || (link.path === "/tasks" && ["/tasks", "/hierarchy", "/graph"].includes(route)) || (link.path === "/settings" && isSettingsRoute) ? "active" : ""}`}
+              className={`nav-item ${route === link.path || (link.path === "/tasks" && ["/tasks", "/graph"].includes(route)) || (link.path === "/settings" && isSettingsRoute) ? "active" : ""}`}
               onClick={() => onNavigate(link.path === "/settings" ? "/settings/profile" : link.path)}
               title={link.label}
             >
@@ -1389,7 +1383,7 @@ function DecisionGraphView({ data }: { data: AppData }) {
       <PageHeader
         eyebrow="결정 그래프"
         title="조직 결정 자산 지도"
-        action={<button className="button secondary" onClick={() => go("/hierarchy")}>계층 보기</button>}
+        action={<button className="button secondary" onClick={() => go("/tasks")}>목록 보기</button>}
       />
       <TaskViewTabs value="graph" tasks={tasks} />
       <div className="toolbar graph-toolbar">
@@ -1549,11 +1543,26 @@ function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: string; me
   const loadedTaskId = useRef<string | null>(null);
 
   const load = async () => {
-    setDetail(await request<TaskDetail>(`/api/tasks/${taskId}`));
+    try {
+      setDetail(await request<TaskDetail>(`/api/tasks/${taskId}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "";
+      if (message.includes("TASK_NOT_FOUND")) {
+        go("/tasks");
+        return;
+      }
+      throw err;
+    }
   };
 
   useEffect(() => {
-    void load();
+    void load().catch((err) => {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : formatFailure("태스크 조회 실패", "대상 정보를 불러오지 못했습니다", "잠시 후 다시 시도하세요")
+      );
+    });
   }, [taskId]);
 
   useEffect(() => {
@@ -1924,6 +1933,17 @@ function SystemFieldsPanel({
     return `${names[0]} +${names.length - 1}`;
   }, [members, task.assigneeIds]);
   const nextActions = decisionActions(decisionState, canApprove);
+  const transitionGateTargets = useMemo(() => {
+    const transitions = task.template?.workflowSchema?.transitions ?? [];
+    const fromStatusId = LEGACY_STATE_TO_STATUS_ID[decisionState];
+    const targets = new Map<string, { hasPolicy: boolean }>();
+    transitions.forEach((row) => {
+      const gate = row.onExit?.approvalGate;
+      if (row.fromStatusId !== fromStatusId || !gate?.enabled) return;
+      targets.set(row.toStatusId, { hasPolicy: Boolean(gate.policyId) });
+    });
+    return targets;
+  }, [decisionState, task.template?.workflowSchema?.transitions]);
 
   useEffect(() => {
     setDecisionState(task.currentState);
@@ -2133,13 +2153,16 @@ function SystemFieldsPanel({
           {nextActionOpen && (
             <div className="next-action-menu">
               <div className="next-action-head">상태</div>
-              {(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"] as TaskState[]).map((state) => (
+              {(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"] as TaskState[]).map((state) => (
                 <button
                   key={state}
                   className={`next-action-item ${decisionState === state ? "active" : ""}`}
                   onClick={() => setDecisionState(state)}
                 >
                   <strong>{STATE_META[state].label}</strong>
+                  {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[state]) && (
+                    <small>{transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[state])?.hasPolicy ? "승인게이트 · 정책연결" : "승인게이트 · 정책미지정"}</small>
+                  )}
                 </button>
               ))}
               <div className="next-action-head">넥스트 액션</div>
@@ -2154,7 +2177,12 @@ function SystemFieldsPanel({
                   }}
                 >
                   <strong>{action.title}</strong>
-                  <small>{STATE_META[action.toState].label}로 전환</small>
+                  <small>
+                    {STATE_META[action.toState].label}로 전환
+                    {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[action.toState])
+                      ? ` · ${transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[action.toState])?.hasPolicy ? "승인게이트(정책연결)" : "승인게이트(정책미지정)"}`
+                      : ""}
+                  </small>
                 </button>
               ))}
             </div>
@@ -3227,9 +3255,13 @@ function NotificationSettingsView() {
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | "unsupported">("default");
+  const [pushError, setPushError] = useState<string | null>(null);
 
   useEffect(() => {
     void request<NotificationSettings>("/api/settings/notifications").then(setSettings);
+    if (typeof window !== "undefined" && "Notification" in window) setPushPermission(Notification.permission);
+    else setPushPermission("unsupported");
   }, []);
 
   const patch = (partial: Partial<NotificationSettings>) => {
@@ -3257,12 +3289,15 @@ function NotificationSettingsView() {
         body: JSON.stringify({
           emailEnabled: settings.emailEnabled,
           pushEnabled: settings.pushEnabled,
+          webPushEnabled: settings.webPushEnabled,
           digestEnabled: settings.digestEnabled,
           mutedComponents: settings.mutedComponents,
           mentionOnlyForWatchers: settings.mentionOnlyForWatchers,
           slaHours: settings.slaHours
         })
       });
+      if (next.webPushEnabled) await syncBrowserPushSubscription();
+      else await request("/api/push/subscriptions", { method: "DELETE", body: JSON.stringify({}) });
       setSettings(next);
       setSaved("저장되었습니다.");
     } finally {
@@ -3272,6 +3307,53 @@ function NotificationSettingsView() {
 
   if (!settings) return <section className="panel"><p className="muted">불러오는 중...</p></section>;
 
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64);
+    return Uint8Array.from([...raw].map((char) => char.charCodeAt(0)));
+  };
+
+  const syncBrowserPushSubscription = async () => {
+    setPushError(null);
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      setPushError("이 브라우저는 웹 푸시를 지원하지 않습니다.");
+      return;
+    }
+    const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+    setPushPermission(permission);
+    if (permission !== "granted") {
+      setPushError("브라우저 알림 권한이 필요합니다.");
+      return;
+    }
+    const registration = await navigator.serviceWorker.register("/sw.js");
+    const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY as string | undefined;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      if (!vapidPublicKey) {
+        setPushError("VITE_WEB_PUSH_PUBLIC_KEY 설정이 필요합니다.");
+        return;
+      }
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+      });
+    }
+    const json = subscription.toJSON();
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
+      setPushError("푸시 구독 정보가 올바르지 않습니다.");
+      return;
+    }
+    await request("/api/push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify({
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+        userAgent: navigator.userAgent
+      })
+    });
+  };
+
   return (
     <section className="page-stack">
       <PageHeader eyebrow="설정" title="알림 설정" />
@@ -3279,6 +3361,28 @@ function NotificationSettingsView() {
         <PanelHeader title="수신 채널" action={<button className="button primary" onClick={() => void save()} disabled={busy}>저장</button>} />
         <div className="stack">
           <label className="toggle-field"><input type="checkbox" checked={settings.pushEnabled} onChange={(event) => patch({ pushEnabled: event.target.checked })} />앱 내 알림 받기</label>
+          <div className="meta-row">
+            <strong>웹 푸시(브라우저)</strong>
+            <div className="row-actions left">
+              <label className="toggle-field">
+                <input
+                  type="checkbox"
+                  checked={settings.webPushEnabled}
+                  onChange={(event) => patch({ webPushEnabled: event.target.checked })}
+                />
+                브라우저 푸시 받기
+              </label>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => void syncBrowserPushSubscription()}
+                disabled={pushPermission === "unsupported"}
+              >
+                {pushPermission === "granted" ? "브라우저 푸시 연결 갱신" : pushPermission === "denied" ? "브라우저 권한 차단됨" : pushPermission === "unsupported" ? "브라우저 미지원" : "브라우저 푸시 연결"}
+              </button>
+            </div>
+          </div>
+          {pushError && <p className="form-error">{pushError}</p>}
           <label className="toggle-field"><input type="checkbox" checked={settings.emailEnabled} onChange={(event) => patch({ emailEnabled: event.target.checked })} />이메일 알림 받기</label>
           <label className="toggle-field"><input type="checkbox" checked={settings.digestEnabled} onChange={(event) => patch({ digestEnabled: event.target.checked })} />일일 요약 받기</label>
           <label className="toggle-field"><input type="checkbox" checked={settings.mentionOnlyForWatchers} onChange={(event) => patch({ mentionOnlyForWatchers: event.target.checked })} />내가 관여한 태스크 멘션만 우선 수신</label>
@@ -3419,7 +3523,14 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
     .filter((task) => {
       if (quickFilter === "all") return true;
       if (quickFilter === "mine") return task.assigneeIds.includes(meId) || task.ownerId === meId;
-      if (quickFilter === "pending") return task.currentState === "PENDING_APPROVAL";
+      if (quickFilter === "pending") {
+        const gateTargetIds = new Set(
+          (task.template?.workflowSchema?.transitions ?? [])
+            .filter((row) => row.onExit?.approvalGate?.enabled)
+            .map((row) => row.toStatusId)
+        );
+        return Boolean(task.workflowStatusId && gateTargetIds.has(task.workflowStatusId));
+      }
       return isDueToday(task.dueDate);
     })
     .sort((a, b) => {
@@ -3431,7 +3542,7 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
   const dragDisabled = sortBy !== "manual" || groupBy !== "none";
   const backlogTasks = filteredTasks.filter((task) => isBacklogTask(task));
 
-  const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => {
+  const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => {
     await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
     await onReload();
   };
@@ -3584,7 +3695,14 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
               tabs={[
                 { value: "all", label: "전체", count: tasks.length },
                 { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
-                { value: "pending", label: "승인 대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
+                { value: "pending", label: "승인 대기", count: tasks.filter((task) => {
+                  const gateTargetIds = new Set(
+                    (task.template?.workflowSchema?.transitions ?? [])
+                      .filter((row) => row.onExit?.approvalGate?.enabled)
+                      .map((row) => row.toStatusId)
+                  );
+                  return Boolean(task.workflowStatusId && gateTargetIds.has(task.workflowStatusId));
+                }).length },
                 { value: "due-today", label: "오늘 기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
               ]}
             />
@@ -3632,6 +3750,7 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
               members={members}
               buckets={buckets}
               dragDisabled={dragDisabled}
+              showSprintAction
               onQuickCreate={async (quickTitle) => {
                 const payload: Record<string, unknown> = { title: quickTitle, templateType: "TASK", currentState: "DRAFT", workflowPhase: "BACKLOG" };
                 if (selectedUnitId) payload.unitId = selectedUnitId;
@@ -3705,6 +3824,7 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
                 buckets={buckets}
                 dragDisabled={dragDisabled}
                 onPatch={patchTask}
+                showBucketSelect
                 bucketControls={(
                   <div className="row-actions">
                     {bucketEditingId === bucket.id ? (
@@ -3748,6 +3868,7 @@ function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId
               buckets={buckets}
               dragDisabled={dragDisabled}
               onPatch={patchTask}
+              showBucketSelect
               onRowDragStart={setDraggingBucketTaskId}
               onRowDragEnd={() => { setDraggingBucketTaskId(null); setActiveDropBucketId(null); }}
             />
@@ -3833,6 +3954,7 @@ function TaskTreeListView({
   onQuickCreate,
   onPatch,
   onMoveParent,
+  showSprintAction = false,
   showQuickAdd = true
 }: {
   tasks: TaskView[];
@@ -3841,8 +3963,9 @@ function TaskTreeListView({
   buckets: Bucket[];
   dragDisabled: boolean;
   onQuickCreate: (title: string) => Promise<void>;
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => Promise<void>;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => Promise<void>;
   onMoveParent: (taskId: string, nextParentId: string | null) => Promise<void>;
+  showSprintAction?: boolean;
   showQuickAdd?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(tasks.map((task) => task.id)));
@@ -3934,13 +4057,13 @@ function TaskTreeListView({
           <span />
           <span>태스크</span>
           <span>담당</span>
-          <span>유형</span>
-          <span>구조</span>
+          <span>타입</span>
+          <span>템플릿</span>
           <span>상태</span>
           <span>우선순위</span>
         </div>
         {(byParent.get(null) ?? []).map((task) => (
-          <TaskTreeRow key={task.id} task={task} level={0} byParent={byParent} expanded={expanded} onToggle={toggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={moveByDrop} />
+          <TaskTreeRow key={task.id} task={task} level={0} byParent={byParent} expanded={expanded} onToggle={toggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={moveByDrop} showSprintAction={showSprintAction} />
         ))}
         {!tasks.length && <div className="empty-row">표시할 태스크가 없습니다.</div>}
       </div>
@@ -3993,7 +4116,8 @@ function TaskTreeRow({
   dropTargetTaskId,
   setDraggingTaskId,
   setDropTargetTaskId,
-  onDropParent
+  onDropParent,
+  showSprintAction = false
 }: {
   task: TaskView;
   level: number;
@@ -4003,7 +4127,7 @@ function TaskTreeRow({
   members: Member[];
   buckets: Bucket[];
   dragDisabled: boolean;
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => Promise<void>;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => Promise<void>;
   focusedTaskId: string | null;
   setFocusedTaskId: (id: string) => void;
   draggingTaskId: string | null;
@@ -4011,9 +4135,11 @@ function TaskTreeRow({
   setDraggingTaskId: (id: string | null) => void;
   setDropTargetTaskId: (id: string | null) => void;
   onDropParent: (parentId: string | null) => Promise<void>;
+  showSprintAction?: boolean;
 }) {
   const children = byParent.get(task.id) ?? [];
   const open = expanded.has(task.id);
+  const bucketName = buckets.find((bucket) => bucket.id === task.bucketId)?.name ?? "버킷 없음";
   return (
     <>
       <div
@@ -4052,26 +4178,29 @@ function TaskTreeRow({
             )}
           </button>
           <div className="tree-inline-actions">
-            <button className="workflow-chip-btn sprint" onClick={() => void onPatch(task.id, { currentState: "IN_PROGRESS", workflowPhase: "ACTIVE" })}>투입</button>
+            {showSprintAction && <button className="workflow-chip-btn sprint" onClick={() => void onPatch(task.id, { currentState: "IN_PROGRESS", workflowPhase: "ACTIVE" })}>투입</button>}
             <button className="workflow-chip-btn backlog" onClick={() => void onPatch(task.id, { currentState: "DRAFT", workflowPhase: "BACKLOG" })}>백로그</button>
-            <Select
-              tone="inline"
-              value={task.bucketId ?? ""}
-              onChange={(value) => void onPatch(task.id, { bucketId: value || null })}
-              options={[["", "버킷 없음"], ...buckets.map((bucket) => [bucket.id, bucket.name] as [string, string])]}
-            />
+            <span className="signal-chip">{bucketName}</span>
           </div>
         </div>
         <span className="owner-cell">
           <strong>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</strong>
         </span>
         <span>{templateLabel(task.templateType)}</span>
-        <span>{STRUCTURE_META[task.structureState].label}</span>
+        <Select
+          tone="inline"
+          value={task.templateId ?? ""}
+          onChange={(value) => void onPatch(task.id, { templateId: value || null })}
+          options={[
+            ["", "형상화 · 자유폼"],
+            ...(task.templateId ? [[task.templateId, `정형화 · ${task.template?.name ?? templateLabel(task.templateType)}`] as [string, string]] : [])
+          ]}
+        />
         <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])} />
         <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
       </div>
       {open && children.map((child) => (
-        <TaskTreeRow key={child.id} task={child} level={level + 1} byParent={byParent} expanded={expanded} onToggle={onToggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={onDropParent} />
+        <TaskTreeRow key={child.id} task={child} level={level + 1} byParent={byParent} expanded={expanded} onToggle={onToggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={onDropParent} showSprintAction={showSprintAction} />
       ))}
     </>
   );
@@ -4090,6 +4219,7 @@ function TaskListPanel({
   onToggleSelect,
   onSelectAll,
   onPatch,
+  showBucketSelect = false,
   bucketControls,
   onRowDragStart,
   onRowDragEnd
@@ -4106,6 +4236,7 @@ function TaskListPanel({
   onToggleSelect?: (taskId: string) => void;
   onSelectAll?: () => void;
   onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => Promise<void>;
+  showBucketSelect?: boolean;
   bucketControls?: ReactNode;
   onRowDragStart?: (taskId: string) => void;
   onRowDragEnd?: () => void;
@@ -4172,12 +4303,16 @@ function TaskListPanel({
               ) : (
                 <span className="muted">-</span>
               )}
-              <Select
-                tone="inline"
-                value={task.bucketId ?? ""}
-                onChange={(value) => void onPatch(task.id, { bucketId: value || null })}
-                options={[["", "버킷 없음"], ...buckets.map((bucket) => [bucket.id, bucket.name] as [string, string])]}
-              />
+              {showBucketSelect ? (
+                <Select
+                  tone="inline"
+                  value={task.bucketId ?? ""}
+                  onChange={(value) => void onPatch(task.id, { bucketId: value || null })}
+                  options={[["", "버킷 없음"], ...buckets.map((bucket) => [bucket.id, bucket.name] as [string, string])]}
+                />
+              ) : (
+                <span className="signal-chip">{buckets.find((bucket) => bucket.id === task.bucketId)?.name ?? "버킷 없음"}</span>
+              )}
             </div>
             <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])} />
             <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
@@ -4224,7 +4359,7 @@ function TaskBoardView({
                   <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((row): row is TaskState => row !== "ALL").map((row) => [row, `${STATE_META[row].label}로 이동`])} />
                 </article>
               ))}
-              <button className="board-add" onClick={() => go("/hierarchy")}>+ Add task</button>
+              <button className="board-add" onClick={() => go("/tasks")}>+ Add task</button>
             </div>
           </section>
         );
@@ -4285,6 +4420,7 @@ function TemplatesView({
       </section>
       <section className="panel">
         <PanelHeader title="전역 상태 라이브러리" />
+        <p className="muted">템플릿 공통 상태 사전입니다. 각 템플릿 전이는 여기 정의된 status id를 참조합니다.</p>
         <textarea className="code-textarea" value={statusJson} onChange={(event) => setStatusJson(event.target.value)} rows={8} />
         <div className="row-actions">
           <button
@@ -4332,6 +4468,42 @@ function TemplateCard({
   workflowStatuses: AppData["workflowStatuses"];
   onReload: () => Promise<void>;
 }) {
+  const normalizeWorkflowSchemaDraft = (raw: unknown) => {
+    const input = raw as {
+      statuses?: Array<{ id: string; name: string; category: string; isDefault?: boolean }>;
+      transitions?: Array<{
+        fromStatusId: string;
+        toStatusId: string;
+        label: string;
+        decisionType: DecisionType;
+        isDecision: boolean;
+        onEnter?: Record<string, unknown>;
+        onExit?: { approvalGate?: { enabled: boolean; policyId?: string | null } };
+      }>;
+    };
+    const statuses = (input.statuses ?? workflowStatuses).map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      category: row.category as "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED",
+      isDefault: Boolean(row.isDefault)
+    }));
+    const transitions = (input.transitions ?? []).map((row) => ({
+      fromStatusId: String(row.fromStatusId),
+      toStatusId: String(row.toStatusId),
+      label: String(row.label),
+      decisionType: row.decisionType,
+      isDecision: Boolean(row.isDecision),
+      onEnter: row.onEnter ?? {},
+      onExit: {
+        ...(row.onExit ?? {}),
+        approvalGate: {
+          enabled: Boolean(row.onExit?.approvalGate?.enabled),
+          policyId: row.onExit?.approvalGate?.policyId ?? null
+        }
+      }
+    }));
+    return { statuses, transitions };
+  };
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: template.name, type: template.type, enabled: template.enabled });
   const [workflowJson, setWorkflowJson] = useState(() =>
@@ -4343,8 +4515,13 @@ function TemplateCard({
         label: rule.label,
         decisionType: rule.decisionType,
         isDecision: rule.isDecision,
-        approvalEnabled: rule.isDecision,
-        approvalPolicyId: null
+        onEnter: {},
+        onExit: {
+          approvalGate: {
+            enabled: rule.isDecision,
+            policyId: null
+          }
+        }
       }))
     }, null, 2)
   );
@@ -4361,8 +4538,13 @@ function TemplateCard({
         label: rule.label,
         decisionType: rule.decisionType,
         isDecision: rule.isDecision,
-        approvalEnabled: rule.isDecision,
-        approvalPolicyId: null
+        onEnter: {},
+        onExit: {
+          approvalGate: {
+            enabled: rule.isDecision,
+            policyId: null
+          }
+        }
       }))
     }, null, 2));
   }, [template.enabled, template.name, template.type, template.workflow, template.workflowSchema, workflowStatuses]);
@@ -4409,7 +4591,8 @@ function TemplateCard({
       setBusy(true);
       setError(null);
       const parsed = JSON.parse(workflowJson);
-      await request(`/api/templates/${template.id}/workflow`, { method: "PATCH", body: JSON.stringify(parsed) });
+      const normalized = normalizeWorkflowSchemaDraft(parsed);
+      await request(`/api/templates/${template.id}/workflow`, { method: "PATCH", body: JSON.stringify(normalized) });
       await onReload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "워크플로우 저장에 실패했습니다.");
@@ -4437,6 +4620,7 @@ function TemplateCard({
             워크플로우(JSON, 고급 설정)
             <textarea className="code-textarea" rows={10} value={workflowJson} onChange={(event) => setWorkflowJson(event.target.value)} />
           </label>
+          <p className="muted">전이는 `onExit.approvalGate.enabled/policyId` 기준으로 승인 게이트를 설정합니다.</p>
           <div className="row-actions">
             <button className="button secondary" disabled={busy} onClick={() => setEditing(false)}>취소</button>
             <button className="button secondary" disabled={busy} onClick={() => void saveWorkflow()}>워크플로우 저장</button>
@@ -4453,12 +4637,17 @@ function TemplateCard({
             </div>
           </div>
           <div className="workflow-list">
-            {template.workflow.map((rule) => (
-              <div key={`${rule.from}-${rule.to}`}>
-                <span>{rule.from}</span>
+            {(template.workflowSchema?.transitions ?? []).map((rule) => (
+              <div key={`${rule.fromStatusId}-${rule.toStatusId}-${rule.decisionType}`}>
+                <span>{rule.fromStatusId}</span>
                 <strong>{rule.label}</strong>
-                <span>{rule.to}</span>
+                <span>{rule.toStatusId}</span>
                 {rule.isDecision && <Badge tone="amber">{decisionLabel[rule.decisionType]}</Badge>}
+                {rule.onExit?.approvalGate?.enabled && (
+                  <Badge tone={rule.onExit.approvalGate.policyId ? "blue" : "red"}>
+                    {rule.onExit.approvalGate.policyId ? "승인게이트(정책연결)" : "승인게이트(정책미지정)"}
+                  </Badge>
+                )}
               </div>
             ))}
           </div>
