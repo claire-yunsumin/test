@@ -39,23 +39,24 @@ Airtable's website is a clean, enterprise-friendly platform that communicates "s
 ## 3. Typography Rules
 
 ### Font Families
-- **Primary**: `Haas`, fallbacks: `-apple-system, system-ui, Segoe UI, Roboto`
-- **Display**: `Haas Groot Disp`, fallback: `Haas`
+- **Primary**: `Pretendard Variable`, `Pretendard`
+- **Fallbacks**: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", sans-serif`
+- **Implementation**: `apps/web/src/styles.css` must import Pretendard webfont and apply it globally on `body`
 
 ### Hierarchy
 
 | Role | Font | Size | Weight | Line Height | Letter Spacing |
 |------|------|------|--------|-------------|----------------|
-| Display Hero | Haas | 48px | 400 | 1.15 | normal |
-| Display Bold | Haas Groot Disp | 48px | 900 | 1.50 | normal |
-| Section Heading | Haas | 40px | 400 | 1.25 | normal |
-| Sub-heading | Haas | 32px | 400–500 | 1.15–1.25 | normal |
-| Card Title | Haas | 24px | 400 | 1.20–1.30 | 0.12px |
-| Feature | Haas | 20px | 400 | 1.25–1.50 | 0.1px |
-| Body | Haas | 18px | 400 | 1.35 | 0.18px |
-| Body Medium | Haas | 16px | 500 | 1.30 | 0.08–0.16px |
-| Button | Haas | 16px | 500 | 1.25–1.30 | 0.08px |
-| Caption | Haas | 14px | 400–500 | 1.25–1.35 | 0.07–0.28px |
+| Display Hero | Pretendard | 48px | 700 | 1.15 | normal |
+| Display Bold | Pretendard | 48px | 800 | 1.25 | normal |
+| Section Heading | Pretendard | 40px | 700 | 1.20 | normal |
+| Sub-heading | Pretendard | 32px | 600–700 | 1.20 | normal |
+| Card Title | Pretendard | 24px | 700 | 1.25 | normal |
+| Feature | Pretendard | 20px | 600 | 1.35 | normal |
+| Body | Pretendard | 16px | 400 | 1.50 | normal |
+| Body Medium | Pretendard | 14px | 500 | 1.45 | normal |
+| Button | Pretendard | 14px | 600 | 1.25 | normal |
+| Caption | Pretendard | 12px | 500 | 1.35 | normal |
 
 ## 4. Component Stylings
 

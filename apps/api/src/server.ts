@@ -120,6 +120,72 @@ app.get("/api/tasks", (req, res) => {
   res.json(data.tasks.filter((task) => visibleIds.has(task.id)).map(serializeTask));
 });
 
+app.get("/api/units", (_req, res) => {
+  res.json(data.units);
+});
+
+app.post("/api/units", (req, res) => {
+  if (!requireRole(req, res, "EDITOR")) return;
+  const body = z.object({
+    name: text(1, 60),
+    purpose: optionalText(80)
+  }).parse(req.body);
+  const unit = {
+    id: `unit-${crypto.randomUUID()}`,
+    name: body.name.trim(),
+    purpose: body.purpose?.trim() || "업무 목적 미정"
+  };
+  data.units.push(unit);
+  res.status(201).json(unit);
+});
+
+app.get("/api/folders", (req, res) => {
+  const unitId = String(req.query.unitId ?? "");
+  const rows = unitId ? data.folders.filter((folder) => folder.unitId === unitId) : data.folders;
+  res.json(rows);
+});
+
+app.post("/api/folders", (req, res) => {
+  if (!requireRole(req, res, "EDITOR")) return;
+  const body = z.object({
+    unitId: z.string(),
+    name: text(1, 60)
+  }).parse(req.body);
+  if (!byId(data.units, body.unitId)) {
+    res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+    return;
+  }
+  const folder = { id: `folder-${crypto.randomUUID()}`, unitId: body.unitId, name: body.name.trim() };
+  data.folders.push(folder);
+  res.status(201).json(folder);
+});
+
+app.get("/api/lists", (req, res) => {
+  const unitId = String(req.query.unitId ?? "");
+  const rows = unitId ? data.lists.filter((list) => list.unitId === unitId) : data.lists;
+  res.json(rows);
+});
+
+app.post("/api/lists", (req, res) => {
+  if (!requireRole(req, res, "EDITOR")) return;
+  const body = z.object({
+    unitId: z.string(),
+    folderId: z.string().nullable().optional(),
+    name: text(1, 60)
+  }).parse(req.body);
+  if (!byId(data.units, body.unitId)) {
+    res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+    return;
+  }
+  if (body.folderId && !data.folders.some((folder) => folder.id === body.folderId && folder.unitId === body.unitId)) {
+    res.status(400).json({ error: "INVALID_FOLDER", requestId: req.requestId });
+    return;
+  }
+  const list = { id: `list-${crypto.randomUUID()}`, unitId: body.unitId, folderId: body.folderId ?? null, name: body.name.trim() };
+  data.lists.push(list);
+  res.status(201).json(list);
+});
+
 function removeTaskCascade(taskId: string): string[] {
   const descendantIds: string[] = data.tasks.filter((task) => task.parentId === taskId).flatMap((task): string[] => removeTaskCascade(task.id));
   const ids: string[] = [taskId, ...descendantIds];
@@ -139,7 +205,10 @@ app.post("/api/tasks", (req, res) => {
       parentId: z.string().nullable().optional(),
       templateId: z.string().nullable().optional(),
       templateType: z.enum(templateTypes).nullable().optional(),
-      structureState: z.enum(["FREEFORM", "TEMPLATED"]).default("FREEFORM")
+      structureState: z.enum(["FREEFORM", "TEMPLATED"]).default("FREEFORM"),
+      unitId: z.string().optional(),
+      folderId: z.string().nullable().optional(),
+      listId: z.string().optional()
     })
     .parse(req.body);
 
@@ -150,8 +219,32 @@ app.post("/api/tasks", (req, res) => {
     return;
   }
 
+  const unitId = body.unitId ?? data.units[0]?.id;
+  if (!unitId || !byId(data.units, unitId)) {
+    res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+    return;
+  }
+  const list = body.listId
+    ? data.lists.find((row) => row.id === body.listId && row.unitId === unitId)
+    : data.lists.find((row) => row.unitId === unitId);
+  if (!list) {
+    res.status(400).json({ error: "INVALID_LIST", requestId: req.requestId });
+    return;
+  }
+  if (body.folderId && !data.folders.some((folder) => folder.id === body.folderId && folder.unitId === unitId)) {
+    res.status(400).json({ error: "INVALID_FOLDER", requestId: req.requestId });
+    return;
+  }
+  if (body.folderId && list.folderId && body.folderId !== list.folderId) {
+    res.status(400).json({ error: "FOLDER_LIST_MISMATCH", requestId: req.requestId });
+    return;
+  }
+
   const task: Task = {
     id: `task-${crypto.randomUUID()}`,
+    unitId,
+    folderId: body.folderId ?? list.folderId ?? null,
+    listId: list.id,
     parentId: body.parentId ?? null,
     title: body.title,
     description: "",
@@ -225,12 +318,15 @@ app.patch("/api/tasks/:taskId", (req, res) => {
       assigneeIds: z.array(z.string()).max(20).optional(),
       watcherIds: z.array(z.string()).max(50).optional(),
       dueDate: z.string().nullable().optional(),
-      formValues: z.record(text(0, 1000)).optional()
+      formValues: z.record(text(0, 1000)).optional(),
+      unitId: z.string().optional(),
+      folderId: z.string().nullable().optional(),
+      listId: z.string().optional()
     })
     .parse(req.body);
 
-  const hasFormPatch = patch.formValues !== undefined;
-  const hasTaskPatch = Object.keys(patch).some((key) => key !== "formValues");
+  const hasFormPatch = patch.formValues !== undefined || patch.description !== undefined;
+  const hasTaskPatch = Object.keys(patch).some((key) => key !== "formValues" && key !== "description");
   if (hasTaskPatch && !requireRole(req, res, "EDITOR")) return;
   if (hasFormPatch && !canEditForm(req.user!, task)) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
@@ -245,7 +341,34 @@ app.patch("/api/tasks/:taskId", (req, res) => {
     res.status(400).json({ error: "INVALID_WATCHER", requestId: req.requestId });
     return;
   }
+  if (patch.unitId && !byId(data.units, patch.unitId)) {
+    res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+    return;
+  }
+  if (patch.unitId && patch.folderId && !data.folders.some((folder) => folder.id === patch.folderId && folder.unitId === patch.unitId)) {
+    res.status(400).json({ error: "INVALID_FOLDER", requestId: req.requestId });
+    return;
+  }
+  if (patch.folderId && !patch.unitId && !data.folders.some((folder) => folder.id === patch.folderId && folder.unitId === task.unitId)) {
+    res.status(400).json({ error: "INVALID_FOLDER", requestId: req.requestId });
+    return;
+  }
+  if (patch.listId) {
+    const nextUnitId = patch.unitId ?? task.unitId;
+    const list = data.lists.find((row) => row.id === patch.listId && row.unitId === nextUnitId);
+    if (!list) {
+      res.status(400).json({ error: "INVALID_LIST", requestId: req.requestId });
+      return;
+    }
+    if (patch.folderId && list.folderId && patch.folderId !== list.folderId) {
+      res.status(400).json({ error: "FOLDER_LIST_MISMATCH", requestId: req.requestId });
+      return;
+    }
+    patch.unitId = list.unitId;
+    patch.folderId = list.folderId;
+  }
   if (patch.parentId !== undefined) {
+    const previousParentId = task.parentId;
     if (patch.parentId === task.id) {
       res.status(400).json({ error: "INVALID_PARENT", requestId: req.requestId });
       return;
@@ -253,6 +376,15 @@ app.patch("/api/tasks/:taskId", (req, res) => {
     if (patch.parentId && !getVisibleTask(req, res, patch.parentId)) return;
     task.parentId = patch.parentId;
     addEngagement({ type: "PARENT_CHANGED", actorId: meId(req), taskId: task.id, targetId: patch.parentId ?? undefined, metadata: {} });
+    addTimeline({
+      taskId: task.id,
+      type: "HIERARCHY_CHANGE",
+      actorId: meId(req),
+      decisionType: null,
+      reason: "상위 구조 변경",
+      referencedNoteIds: [],
+      payload: { fromParentId: previousParentId, toParentId: patch.parentId }
+    });
   }
   if (patch.templateId) {
     const template = applyTemplate(task, patch.templateId);

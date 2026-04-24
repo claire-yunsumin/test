@@ -4,7 +4,6 @@ export function PageHeader({ eyebrow, title, action }: { eyebrow: string; title:
   return (
     <div className="page-header">
       <div>
-        <div className="eyebrow">{eyebrow}</div>
         <h1>{title}</h1>
       </div>
       {action}
@@ -66,13 +65,15 @@ export function Select({
   onChange,
   options,
   label,
-  tone = "default"
+  tone = "default",
+  disabled = false
 }: {
   value: string;
   onChange: (value: string) => void;
   options: Array<[string, string]>;
   label?: string;
   tone?: "default" | "filter" | "inline";
+  disabled?: boolean;
 }) {
   const selected = options.find(([v]) => v === value)?.[1] ?? value;
   return (
@@ -80,7 +81,7 @@ export function Select({
       <div className="select-frame">
         {label && <em className="select-inline-label">{label}</em>}
         <strong className="select-value">{selected}</strong>
-        <select value={value} onChange={(event) => onChange(event.target.value)} aria-label={label ?? selected}>
+        <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} aria-label={label ?? selected}>
           {options.map(([v, optionLabel]) => (
             <option key={v} value={v}>
               {optionLabel}

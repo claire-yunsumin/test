@@ -83,14 +83,14 @@ describe("authorization boundaries", () => {
   });
 
   test("prevents IDOR access to tasks outside the user's visible scope", async () => {
-    const { response, body } = await api("/api/tasks/task-kr1", { userId: "u-viewer" });
+    const { response, body } = await api("/api/tasks/task-file-block", { userId: "u-viewer" });
 
     assert.equal(response.status, 403);
     assert.equal(body.error, "FORBIDDEN");
   });
 
   test("prevents non-owners from deleting visible tasks", async () => {
-    const { response, body } = await api("/api/tasks/task-kr2", {
+    const { response, body } = await api("/api/tasks/task-marketing-strategy", {
       userId: "u-marketing",
       method: "DELETE"
     });
@@ -100,7 +100,7 @@ describe("authorization boundaries", () => {
   });
 
   test("prevents comment edits by users who are neither author nor ADMIN", async () => {
-    const created = await api("/api/tasks/task-objective/comments", {
+    const created = await api("/api/tasks/task-marketing-strategy/comments", {
       userId: "u-admin",
       method: "POST",
       body: JSON.stringify({ content: "Admin-only comment", referencedNoteIds: [] })
@@ -130,7 +130,7 @@ describe("authorization boundaries", () => {
 
 describe("input validation", () => {
   test("allows cross-task note references inside the user's visible graph", async () => {
-    const { response, body } = await api("/api/tasks/task-exec1/comments", {
+    const { response, body } = await api("/api/tasks/task-target-research/comments", {
       userId: "u-pm",
       method: "POST",
       body: JSON.stringify({ content: "Cross-task graph reference", referencedNoteIds: ["note-analysis"] })
@@ -141,10 +141,10 @@ describe("input validation", () => {
   });
 
   test("rejects invalid note references across tasks", async () => {
-    const { response, body } = await api("/api/tasks/task-objective/comments", {
+    const { response, body } = await api("/api/tasks/task-marketing-strategy/comments", {
       userId: "u-admin",
       method: "POST",
-      body: JSON.stringify({ content: "Bad note reference", referencedNoteIds: ["note-kr1-research"] })
+      body: JSON.stringify({ content: "Bad note reference", referencedNoteIds: ["note-missing"] })
     });
 
     assert.equal(response.status, 400);
@@ -161,6 +161,133 @@ describe("input validation", () => {
     assert.equal(response.status, 400);
     assert.equal(body.error, "VALIDATION_ERROR");
     assert.deepEqual(body.issues, ["title"]);
+  });
+
+  test("creates a FREEFORM node and then connects it to a parent", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Freeform strategy node", structureState: "FREEFORM" })
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.structureState, "FREEFORM");
+    assert.equal(created.body.templateId, null);
+
+    const connected = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ parentId: "task-vision" })
+    });
+    assert.equal(connected.response.status, 200);
+    assert.equal(connected.body.parentId, "task-vision");
+  });
+
+  test("rejects task creation when folder and list do not match", async () => {
+    const { response, body } = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        title: "Invalid folder/list pair",
+        unitId: "unit-growth",
+        listId: "list-growth-objective",
+        folderId: "folder-growth-exec"
+      })
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(body.error, "FOLDER_LIST_MISMATCH");
+  });
+
+  test("applies a template and initializes form fields", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Template target", structureState: "FREEFORM" })
+    });
+    assert.equal(created.response.status, 201);
+
+    const applied = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: "tpl-marketing-objective" })
+    });
+    assert.equal(applied.response.status, 200);
+    assert.equal(applied.body.structureState, "TEMPLATED");
+    assert.equal(applied.body.templateId, "tpl-marketing-objective");
+    assert.equal(applied.body.templateType, "OBJECTIVE");
+    assert.ok(Object.prototype.hasOwnProperty.call(applied.body.formValues, "marketAnalysis"));
+  });
+
+  test("rejects task patch when folder and list do not match", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        title: "Patch target",
+        unitId: "unit-growth",
+        listId: "list-growth-objective"
+      })
+    });
+    assert.equal(created.response.status, 201);
+
+    const patched = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({
+        listId: "list-growth-objective",
+        folderId: "folder-growth-exec"
+      })
+    });
+
+    assert.equal(patched.response.status, 400);
+    assert.equal(patched.body.error, "FOLDER_LIST_MISMATCH");
+  });
+
+  test("rejects invalid mentions and accepts valid member, task, field, and note mentions", async () => {
+    const invalid = await api("/api/tasks/task-marketing-strategy/comments", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        content: "Bad mention",
+        mentions: [{ type: "TASK", targetId: "missing-task", label: "Missing" }]
+      })
+    });
+    assert.equal(invalid.response.status, 400);
+    assert.equal(invalid.body.error, "INVALID_MENTION");
+
+    const valid = await api("/api/tasks/task-marketing-strategy/comments", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        content: "Valid mention bundle",
+        mentions: [
+          { type: "MEMBER", targetId: "u-lead", label: "이팀장" },
+          { type: "TASK", targetId: "task-market-validation", label: "시장성 검증" },
+          { type: "FORM_FIELD", targetId: "task-marketing-strategy", fieldKey: "marketAnalysis", label: "M2 시장 분석" },
+          { type: "NOTE", targetId: "note-analysis", label: "분석 요약" }
+        ]
+      })
+    });
+    assert.equal(valid.response.status, 201);
+    assert.equal(valid.body.mentions.length, 4);
+    assert.deepEqual(valid.body.referencedNoteIds, ["note-analysis"]);
+  });
+
+  test("calculates retention analytics from engagement events", async () => {
+    await api("/api/tasks/task-marketing-strategy/comments", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        content: "Analytics mention",
+        mentions: [{ type: "MEMBER", targetId: "u-lead", label: "이팀장" }]
+      })
+    });
+
+    const { response, body } = await api("/api/analytics/retention", { userId: "u-admin" });
+    assert.equal(response.status, 200);
+    assert.ok(body.shapedNodeCount >= 1);
+    assert.ok(body.mentionCount >= 1);
+    assert.ok(body.mentionThreadCount >= 1);
   });
 });
 

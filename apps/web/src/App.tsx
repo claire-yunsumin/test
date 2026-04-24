@@ -11,6 +11,9 @@ import {
   type InboxComponent,
   type Member,
   type Note,
+  type Folder,
+  type TaskList,
+  type Unit,
   type Role,
   type Task,
   type TaskState,
@@ -59,6 +62,7 @@ const eventLabel: Record<string, string> = {
   CANCELED: "취소"
 };
 const fallbackTemplateLabel = "자유 노드";
+const TASK_DESCRIPTION_FIELD_KEY = "__task_description";
 
 function templateTone(type: TemplateType | null | undefined) {
   return type ? TEMPLATE_META[type].tone : "slate";
@@ -93,6 +97,27 @@ function decisionHint(state: TaskState, canApprove: boolean) {
   return "현재 상태에서는 추가 액션이 제한됩니다";
 }
 
+type DecisionAction = {
+  toState: TaskState;
+  decisionType: DecisionType;
+  title: string;
+  tone: "primary" | "secondary" | "danger";
+};
+
+function decisionActions(state: TaskState, canApprove: boolean): DecisionAction[] {
+  if (state === "DRAFT") return [{ toState: "IN_PROGRESS", decisionType: "STATE_ONLY", title: "작업 시작", tone: "primary" }];
+  if (state === "IN_PROGRESS") return [{ toState: "PENDING_APPROVAL", decisionType: "SUPPLEMENT", title: "검토 요청", tone: "primary" }];
+  if (state === "PENDING_APPROVAL") {
+    if (!canApprove) return [];
+    return [
+      { toState: "IN_PROGRESS", decisionType: "SUPPLEMENT", title: "보완 요청", tone: "secondary" },
+      { toState: "CANCELED", decisionType: "REJECT", title: "반려", tone: "danger" },
+      { toState: "DONE", decisionType: "APPROVE", title: "승인", tone: "primary" }
+    ];
+  }
+  return [];
+}
+
 function isDueToday(value: string | null | undefined) {
   if (!value) return false;
   const today = new Date();
@@ -114,8 +139,12 @@ function memberName(members: Member[], id: string) {
   return members.find((member) => member.id === id)?.name ?? "알 수 없음";
 }
 
-function toggleId(ids: string[], id: string) {
-  return ids.includes(id) ? ids.filter((value) => value !== id) : [...ids, id];
+type TaskAccessLevel = "ASSIGNEE" | "WATCHER" | "VIEW";
+
+function taskAccessOf(task: TaskView, memberId: string): TaskAccessLevel {
+  if (task.assigneeIds.includes(memberId)) return "ASSIGNEE";
+  if (task.watcherIds.includes(memberId)) return "WATCHER";
+  return "VIEW";
 }
 
 function useDebouncedEffect(effect: () => void, deps: unknown[], delay = 900) {
@@ -133,25 +162,19 @@ function densitySignal(task: TaskView) {
   return task.activity.notesCount + task.activity.commentsCount + task.activity.filesCount;
 }
 
-type TaskViewMode = "list" | "table" | "board" | "backlog" | "hierarchy" | "graph";
+type TaskViewMode = "list" | "board" | "backlog" | "graph";
 
 function taskViewTabs(tasks: TaskView[]) {
   const backlogCount = tasks.filter((task) => task.currentState === "DRAFT").length;
   return [
     { value: "list", label: "리스트", count: tasks.length },
-    { value: "table", label: "테이블" },
     { value: "board", label: "보드" },
     { value: "backlog", label: "백로그", count: backlogCount },
-    { value: "hierarchy", label: "계층" },
     { value: "graph", label: "결정 그래프" }
   ] as Array<{ value: TaskViewMode; label: string; count?: number }>;
 }
 
 function goTaskViewTab(value: TaskViewMode) {
-  if (value === "hierarchy") {
-    go("/hierarchy");
-    return;
-  }
   if (value === "graph") {
     go("/graph");
     return;
@@ -174,7 +197,6 @@ function TaskViewTabs({
 }) {
   return (
     <div className="tabs-section">
-      <small className="tabs-section-label">뷰</small>
       <Tabs
         variant="segmented"
         value={value}
@@ -189,14 +211,29 @@ function TaskViewTabs({
   );
 }
 
+function headerBreadcrumb(route: string, taskId: string | undefined, tasks: TaskView[]) {
+  const task = taskId ? tasks.find((row) => row.id === taskId) : null;
+  if (route.startsWith("/tasks/") && task) {
+    return [
+      { label: "태스크", path: "/tasks" },
+      { label: task.title, path: `/tasks/${task.id}` }
+    ];
+  }
+  if (route === "/tasks" || route === "/hierarchy") return [{ label: "태스크", path: "/tasks" }];
+  if (route === "/graph") return [{ label: "태스크", path: "/tasks" }, { label: "결정 그래프", path: "/graph" }];
+  if (route === "/inbox") return [{ label: "알림함", path: "/inbox" }];
+  if (route === "/templates") return [{ label: "템플릿", path: "/templates" }];
+  if (route === "/admin/members") return [{ label: "관리", path: "/admin/members" }, { label: "멤버", path: "/admin/members" }];
+  if (route === "/admin/analytics") return [{ label: "관리", path: "/admin/analytics" }, { label: "분석", path: "/admin/analytics" }];
+  return [{ label: "태스크", path: "/tasks" }];
+}
+
 export function App() {
   const [route, setRoute] = useState<Route>(() => currentRoute());
   const [data, setData] = useState<AppData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [density, setDensity] = useState<"compact" | "comfortable">(() => {
-    const stored = window.localStorage.getItem("ui-density");
-    return stored === "comfortable" ? "comfortable" : "compact";
-  });
+  const [selectedUnitId, setSelectedUnitId] = useState<string>(() => new URLSearchParams(window.location.search).get("unit") ?? "");
+  const [selectedListId, setSelectedListId] = useState<string>(() => new URLSearchParams(window.location.search).get("list") ?? "");
 
   const reload = async () => {
     try {
@@ -213,10 +250,6 @@ export function App() {
     void reload();
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-
-  useEffect(() => {
-    window.localStorage.setItem("ui-density", density);
-  }, [density]);
 
   if (error) {
     return (
@@ -241,65 +274,137 @@ export function App() {
     );
   }
 
+  const tasksByUnit = selectedUnitId
+    ? (data.tasks as TaskView[]).filter((task) => task.unitId === selectedUnitId)
+    : (data.tasks as TaskView[]);
+  const tasksByContext = selectedListId ? tasksByUnit.filter((task) => task.listId === selectedListId) : tasksByUnit;
+  const activeUnitId = selectedUnitId || data.units[0]?.id || "";
+  const activeListId = selectedListId || data.lists.find((row) => row.unitId === activeUnitId)?.id || "";
+  const setUnit = (unitId: string) => {
+    setSelectedUnitId(unitId);
+    const nextListId = data.lists.find((row) => row.unitId === unitId)?.id ?? "";
+    setSelectedListId(nextListId);
+    const url = new URL(window.location.href);
+    if (!unitId) url.searchParams.delete("unit");
+    else url.searchParams.set("unit", unitId);
+    if (!nextListId) url.searchParams.delete("list");
+    else url.searchParams.set("list", nextListId);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  };
+  const setList = (listId: string) => {
+    setSelectedListId(listId);
+    const list = data.lists.find((row) => row.id === listId);
+    if (list) setSelectedUnitId(list.unitId);
+    const url = new URL(window.location.href);
+    if (list?.unitId) url.searchParams.set("unit", list.unitId);
+    if (!listId) url.searchParams.delete("list");
+    else url.searchParams.set("list", listId);
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  };
+  const createUnit = async (name: string) => {
+    const created = await request<Unit>("/api/units", { method: "POST", body: JSON.stringify({ name }) });
+    await reload();
+    setUnit(created.id);
+  };
+  const createFolder = async (unitId: string, name: string) => {
+    await request<Folder>("/api/folders", { method: "POST", body: JSON.stringify({ unitId, name }) });
+    await reload();
+  };
+  const createList = async (unitId: string, folderId: string | null, name: string) => {
+    const created = await request<TaskList>("/api/lists", { method: "POST", body: JSON.stringify({ unitId, folderId, name }) });
+    await reload();
+    setList(created.id);
+  };
+
   return (
     <Shell
       route={route.path}
+      taskId={route.taskId}
       me={data.me}
       inbox={data.inbox}
-      tasks={data.tasks as TaskView[]}
+      tasks={tasksByContext}
+      units={data.units}
+      folders={data.folders}
+      lists={data.lists}
+      selectedUnitId={activeUnitId}
+      selectedListId={activeListId}
+      onSelectUnit={setUnit}
+      onSelectList={setList}
+      onCreateUnit={createUnit}
+      onCreateFolder={createFolder}
+      onCreateList={createList}
       analytics={data.analytics}
       onNavigate={go}
-      density={density}
-      onToggleDensity={() => setDensity((prev) => (prev === "compact" ? "comfortable" : "compact"))}
     >
       {route.path.startsWith("/tasks/") && route.taskId ? (
-        <TaskWorkspace taskId={route.taskId} me={data.me} onReload={reload} />
-      ) : route.path === "/tasks" ? (
-        <TasksView tasks={data.tasks as TaskView[]} members={data.members} me={data.me} onReload={reload} />
+        <TaskWorkspace taskId={route.taskId} me={data.me} templates={data.templates} onReload={reload} />
+      ) : route.path === "/tasks" || route.path === "/hierarchy" ? (
+        <TasksView tasks={tasksByContext} members={data.members} me={data.me} selectedUnitId={activeUnitId} selectedListId={activeListId} onReload={reload} />
       ) : route.path === "/graph" ? (
-        <DecisionGraphView data={data} />
+        <DecisionGraphView data={{ ...data, tasks: tasksByContext }} />
       ) : route.path === "/inbox" ? (
-        <InboxView data={data} onReload={reload} />
+        <InboxView data={{ ...data, tasks: tasksByContext, notes: data.notes.filter((note) => tasksByContext.some((task) => task.id === note.taskId)), comments: data.comments.filter((comment) => tasksByContext.some((task) => task.id === comment.taskId)), timeline: data.timeline.filter((event) => tasksByContext.some((task) => task.id === event.taskId)) }} onReload={reload} />
       ) : route.path === "/templates" ? (
         <TemplatesView templates={data.templates} onReload={reload} />
       ) : route.path === "/admin/members" ? (
         <MembersView members={data.members} onReload={reload} />
       ) : route.path === "/admin/analytics" ? (
         <AnalyticsView analytics={data.analytics} />
-      ) : (
-        <HierarchyView data={data} onReload={reload} />
-      )}
+      ) : null}
     </Shell>
   );
 }
 
 function Shell({
   route,
+  taskId,
   me,
   inbox,
   tasks,
+  units,
+  folders,
+  lists,
+  selectedUnitId,
+  selectedListId,
+  onSelectUnit,
+  onSelectList,
+  onCreateUnit,
+  onCreateFolder,
+  onCreateList,
   analytics,
   onNavigate,
-  density,
-  onToggleDensity,
   children
 }: {
   route: string;
+  taskId?: string;
   me: Member;
   inbox: AppData["inbox"];
   tasks: TaskView[];
+  units: Unit[];
+  folders: Folder[];
+  lists: TaskList[];
+  selectedUnitId: string;
+  selectedListId: string;
+  onSelectUnit: (unitId: string) => void;
+  onSelectList: (listId: string) => void;
+  onCreateUnit: (name: string) => Promise<void>;
+  onCreateFolder: (unitId: string, name: string) => Promise<void>;
+  onCreateList: (unitId: string, folderId: string | null, name: string) => Promise<void>;
   analytics: Analytics;
   onNavigate: (path: string) => void;
-  density: "compact" | "comfortable";
-  onToggleDensity: () => void;
   children: ReactNode;
 }) {
   const unread = inbox.filter((item) => !item.readAt).length;
   const pending = tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length;
   const done = tasks.filter((task) => task.currentState === "DONE").length;
   const templated = tasks.filter((task) => task.structureState === "TEMPLATED").length;
+  const breadcrumbs = headerBreadcrumb(route, taskId, tasks);
   const [searchOpen, setSearchOpen] = useState(false);
   const [globalQuery, setGlobalQuery] = useState("");
+  const [unitName, setUnitName] = useState("");
+  const [unitCreating, setUnitCreating] = useState(false);
+  const [folderNameByUnit, setFolderNameByUnit] = useState<Record<string, string>>({});
+  const [listNameByFolder, setListNameByFolder] = useState<Record<string, string>>({});
   const globalResults = tasks
     .filter((task) => !globalQuery.trim() || `${task.title} ${task.description}`.toLowerCase().includes(globalQuery.toLowerCase()))
     .slice(0, 8);
@@ -312,7 +417,7 @@ function Shell({
   ];
 
   return (
-    <div className={`app-shell density-${density}`}>
+    <div className="app-shell">
       <aside className="sidebar">
         <button className="brand" onClick={() => onNavigate("/hierarchy")}>
           <span className="brand-mark">S4</span>
@@ -333,13 +438,96 @@ function Shell({
             </button>
           ))}
         </nav>
+        <section className="unit-list">
+          <div className="unit-list-head">
+            <small>유닛</small>
+          </div>
+          {units.map((unit) => (
+            <div key={unit.id} className={`unit-item-wrap ${selectedUnitId === unit.id ? "active" : ""}`}>
+              <button
+                className={`unit-item ${selectedUnitId === unit.id ? "active" : ""}`}
+                onClick={() => onSelectUnit(unit.id)}
+                title={unit.purpose}
+              >
+                <strong>{unit.name}</strong>
+                <small>{unit.purpose}</small>
+              </button>
+              <div className="folder-list">
+                {folders.filter((folder) => folder.unitId === unit.id).map((folder) => (
+                  <div key={folder.id} className="folder-item">
+                    <small>{folder.name}</small>
+                    <div className="list-items">
+                      {lists.filter((list) => list.folderId === folder.id).map((list) => (
+                        <button
+                          key={list.id}
+                          className={`list-item ${selectedListId === list.id ? "active" : ""}`}
+                          onClick={() => onSelectList(list.id)}
+                        >
+                          {list.name}
+                        </button>
+                      ))}
+                    </div>
+                    <form
+                      className="list-create-inline"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const name = folderNameByUnit[folder.id]?.trim();
+                        if (!name) return;
+                        void onCreateList(unit.id, folder.id, name).then(() => setFolderNameByUnit((prev) => ({ ...prev, [folder.id]: "" })));
+                      }}
+                    >
+                      <input
+                        value={folderNameByUnit[folder.id] ?? ""}
+                        onChange={(event) => setFolderNameByUnit((prev) => ({ ...prev, [folder.id]: event.target.value }))}
+                        placeholder="+ 리스트"
+                      />
+                    </form>
+                  </div>
+                ))}
+                <form
+                  className="folder-create-inline"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const name = listNameByFolder[unit.id]?.trim();
+                    if (!name) return;
+                    void onCreateFolder(unit.id, name).then(() => setListNameByFolder((prev) => ({ ...prev, [unit.id]: "" })));
+                  }}
+                >
+                  <input
+                    value={listNameByFolder[unit.id] ?? ""}
+                    onChange={(event) => setListNameByFolder((prev) => ({ ...prev, [unit.id]: event.target.value }))}
+                    placeholder="+ 폴더"
+                  />
+                </form>
+              </div>
+            </div>
+          ))}
+          <form
+            className="unit-create"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!unitName.trim()) return;
+              setUnitCreating(true);
+              void onCreateUnit(unitName.trim()).then(() => setUnitName("")).finally(() => setUnitCreating(false));
+            }}
+          >
+            <input value={unitName} onChange={(event) => setUnitName(event.target.value)} placeholder="새 유닛 이름" />
+            <button className="button secondary" disabled={unitCreating || !unitName.trim()}>추가</button>
+          </form>
+        </section>
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <div>
-            <div className="eyebrow">HWE MVP R2/R3</div>
-            <strong>결정 워크스페이스</strong>
-          </div>
+          <nav className="top-breadcrumb" aria-label="헤더 경로">
+            {breadcrumbs.map((crumb, index) => (
+              <span key={`${crumb.path}-${index}`}>
+                <button onClick={() => onNavigate(crumb.path)} className={`breadcrumb-link ${index === breadcrumbs.length - 1 ? "current" : ""}`}>
+                  {crumb.label}
+                </button>
+                {index < breadcrumbs.length - 1 && <i>›</i>}
+              </span>
+            ))}
+          </nav>
           <div className="market-tape" aria-label="운영 지표">
             <span><small>Pending</small><strong>{pending}</strong></span>
             <span><small>Done</small><strong>{done}</strong></span>
@@ -347,9 +535,6 @@ function Shell({
             <span><small>Retention</small><strong>{pct(analytics.weeklyReturnRate)}</strong></span>
           </div>
           <div className="top-actions">
-            <button className="density-button" onClick={onToggleDensity}>
-              {density === "compact" ? "Comfortable" : "Compact"}
-            </button>
             <button className="search-button" onClick={() => setSearchOpen(true)}>검색</button>
             <Badge tone="blue">{roleLabel[me.role]}</Badge>
             <div className="avatar">{me.name.slice(0, 1)}</div>
@@ -456,7 +641,6 @@ function HierarchyView({ data, onReload }: { data: AppData; onReload: () => Prom
         title="결정 대상 구조"
         action={<button className="button primary" onClick={() => go("/tasks")}>새 태스크</button>}
       />
-      <TaskViewTabs value="hierarchy" tasks={tasks} />
       <FilterShell
         meta={<span>{filteredIds.size} visible · {tasks.length} total</span>}
         action={<button className="button secondary" onClick={() => { setSearch(""); setType("ALL"); setState("ALL"); setAssignee("ALL"); }}>필터 초기화</button>}
@@ -538,6 +722,17 @@ type GraphLayer = "context" | "decision" | "refs";
 
 function shortText(value: string, max = 32) {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function buildTaskBreadcrumb(task: TaskView, referenceableTasks: TaskView[]) {
+  const map = new Map(referenceableTasks.map((row) => [row.id, row]));
+  const trail: TaskView[] = [];
+  let cursor: TaskView | undefined = task;
+  while (cursor) {
+    trail.unshift(cursor);
+    cursor = cursor.parentId ? map.get(cursor.parentId) : undefined;
+  }
+  return trail;
 }
 
 function DecisionGraphView({ data }: { data: AppData }) {
@@ -742,12 +937,12 @@ function DecisionGraphView({ data }: { data: AppData }) {
   );
 }
 
-function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; onReload: () => Promise<void> }) {
+function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: string; me: Member; templates: Template[]; onReload: () => Promise<void> }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [decision, setDecision] = useState<{ toState: TaskState; decisionType: DecisionType; title: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [taskDraft, setTaskDraft] = useState({ title: "", description: "" });
+  const [taskDraft, setTaskDraft] = useState({ title: "" });
   const [autoSaving, setAutoSaving] = useState(false);
   const loadedTaskId = useRef<string | null>(null);
 
@@ -761,15 +956,15 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
 
   useEffect(() => {
     if (!detail) return;
-    setTaskDraft({ title: detail.task.title, description: detail.task.description });
+    setTaskDraft({ title: detail.task.title });
     loadedTaskId.current = detail.task.id;
-  }, [detail?.task.description, detail?.task.id, detail?.task.title]);
+  }, [detail?.task.id, detail?.task.title]);
 
   const task = detail?.task;
 
   const saveTask = async (nextDraft = taskDraft, quiet = false) => {
     if (!nextDraft.title.trim() || !detail || !task) return;
-    if (nextDraft.title === detail.task.title && nextDraft.description === detail.task.description) return;
+    if (nextDraft.title === detail.task.title) return;
     try {
       if (quiet) setAutoSaving(true);
       else setBusy(true);
@@ -790,13 +985,14 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
 
   useDebouncedEffect(() => {
     if (!detail || loadedTaskId.current !== detail.task.id) return;
-    if (taskDraft.title === detail.task.title && taskDraft.description === detail.task.description) return;
+    if (taskDraft.title === detail.task.title) return;
     void saveTask(taskDraft, true);
-  }, [taskDraft.title, taskDraft.description, detail?.task.id], 1100);
+  }, [taskDraft.title, detail?.task.id], 1100);
 
   if (!detail || !task) return <Centered><div className="loader" /></Centered>;
 
 	  const { parent, notes, referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
+  const canEditTask = permissions?.canEditTask ?? ["ADMIN", "EDITOR", "APPROVER"].includes(me.role);
   const canEditForm = permissions?.canEditForm ?? ["ADMIN", "EDITOR", "APPROVER"].includes(me.role);
   const changed = hasChangedSinceSeen(task, parent, me.id);
   const canApprove = ["APPROVER", "ADMIN"].includes(me.role);
@@ -841,61 +1037,71 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
 
   return (
     <section className="page-stack">
-      <div className="task-heading">
-        <button className="back-link" onClick={() => go("/hierarchy")}>계층으로 돌아가기</button>
-        <div className="task-title-row">
-          <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
-          <Badge tone={STRUCTURE_META[task.structureState].tone}>{STRUCTURE_META[task.structureState].label}</Badge>
-          <input
-            className="task-title-input"
-            value={taskDraft.title}
-            maxLength={120}
-            onChange={(event) => setTaskDraft((prev) => ({ ...prev, title: event.target.value }))}
-            onBlur={() => void saveTask(taskDraft, true)}
-            aria-label="태스크 제목"
-          />
-          <Badge tone={STATE_META[task.currentState].tone}>{STATE_META[task.currentState].label}</Badge>
-          <div className="task-heading-actions">
-            {autoSaving && <span className="save-indicator">자동저장 중</span>}
-            {actionError && <button className="button secondary" onClick={() => setTaskDraft({ title: task.title, description: task.description })}>되돌리기</button>}
-            <button
-              className="button danger"
-              disabled={busy || !canDeleteTask}
-              title={
-                canDeleteTask
-                  ? "태스크 삭제"
-                  : "삭제 불가: 현재 사용자는 삭제 권한이 없습니다. 소유자이거나 관리자 권한일 때 삭제할 수 있습니다."
-              }
-              onClick={() => void deleteTask()}
-            >
-              삭제
-            </button>
-          </div>
-        </div>
-        <textarea
-          className="task-description-input"
-          value={taskDraft.description}
-          maxLength={1200}
-          rows={3}
-          onChange={(event) => setTaskDraft((prev) => ({ ...prev, description: event.target.value }))}
-          onBlur={() => void saveTask(taskDraft, true)}
-          placeholder="설명이 아직 없습니다."
-          aria-label="태스크 설명"
-        />
-      </div>
-
-      {changed && parent && (
-        <div className="change-banner">
-          <strong>{parent.title}</strong>
-          <span>상위 결정 대상이 마지막 방문 이후 업데이트되었습니다.</span>
-          <button className="button secondary" onClick={() => go(`/tasks/${parent.id}`)}>확인</button>
-        </div>
-      )}
-
       <div className="decision-layout">
-        <SystemFieldsPanel task={task} members={members} childrenCount={children.length} notes={notes} comments={comments} onReload={load} />
-
         <div className="main-column">
+          <div className="task-heading">
+            <div className="task-heading-top">
+              <nav className="task-breadcrumb" aria-label="태스크 경로">
+                {buildTaskBreadcrumb(task, referenceableTasks).map((node, index, rows) => (
+                  <span key={node.id}>
+                    <button className={`breadcrumb-link ${node.id === task.id ? "current" : ""}`} onClick={() => go(`/tasks/${node.id}`)}>
+                      {node.title}
+                    </button>
+                    {index < rows.length - 1 && <i>›</i>}
+                  </span>
+                ))}
+              </nav>
+              <div className="task-heading-top-actions">
+                <button className="back-link" onClick={() => go("/tasks")}>목록으로</button>
+                <button
+                  className="text-button danger-text tiny-delete"
+                  disabled={busy || !canDeleteTask}
+                  title={
+                    canDeleteTask
+                      ? "태스크 삭제"
+                      : "삭제 불가: 현재 사용자는 삭제 권한이 없습니다. 소유자이거나 관리자 권한일 때 삭제할 수 있습니다."
+                  }
+                  onClick={() => void deleteTask()}
+                >
+                  삭제
+                </button>
+              </div>
+            </div>
+            <div className="task-title-row">
+              <input
+                className="task-title-input"
+                value={taskDraft.title}
+                maxLength={120}
+                onChange={(event) => setTaskDraft((prev) => ({ ...prev, title: event.target.value }))}
+                onBlur={() => void saveTask(taskDraft, true)}
+                aria-label="태스크 제목"
+              />
+              <div className="task-heading-actions">
+                {autoSaving && <span className="save-indicator">자동저장 중</span>}
+                {actionError && <button className="button secondary task-head-button" onClick={() => setTaskDraft({ title: task.title })}>되돌리기</button>}
+              </div>
+            </div>
+            <SystemFieldsPanel
+              task={task}
+              members={members}
+              templates={templates}
+              referenceableTasks={referenceableTasks}
+              canEditTask={canEditTask}
+              canApprove={canApprove}
+              childrenCount={children.length}
+              notes={notes}
+              comments={comments}
+              onOpenDecision={setDecision}
+              onReload={load}
+            />
+          </div>
+          {changed && parent && (
+            <div className="change-banner">
+              <strong>{parent.title}</strong>
+              <span>상위 결정 대상이 마지막 방문 이후 업데이트되었습니다.</span>
+              <button className="button secondary" onClick={() => go(`/tasks/${parent.id}`)}>확인</button>
+            </div>
+          )}
           <FormOutput task={task} canEditForm={canEditForm} onReload={load} />
           <NotesSection taskId={task.id} notes={notes} members={members} onReload={load} />
         </div>
@@ -910,37 +1116,6 @@ function TaskWorkspace({ taskId, me, onReload }: { taskId: string; me: Member; o
           me={me}
           onReload={load}
         />
-      </div>
-
-      <div className="decision-bar">
-        <div>
-          <strong>결정 액션</strong>
-          <span>{actionError ?? decisionHint(task.currentState, canApprove)}</span>
-        </div>
-        <div className="bar-actions">
-          {task.currentState === "DRAFT" && (
-            <button className="button primary" onClick={() => setDecision({ toState: "IN_PROGRESS", decisionType: "STATE_ONLY", title: "작업 시작" })}>시작</button>
-          )}
-          {task.currentState === "IN_PROGRESS" && (
-            <button className="button primary" onClick={() => setDecision({ toState: "PENDING_APPROVAL", decisionType: "SUPPLEMENT", title: "검토 요청" })}>검토 요청</button>
-          )}
-          {task.currentState === "PENDING_APPROVAL" && canApprove && (
-            <>
-              <button className="button secondary" onClick={() => setDecision({ toState: "IN_PROGRESS", decisionType: "SUPPLEMENT", title: "보완 요청" })}>보완 요청</button>
-              <button className="button danger" onClick={() => setDecision({ toState: "CANCELED", decisionType: "REJECT", title: "반려" })}>반려</button>
-              <button className="button primary" onClick={() => setDecision({ toState: "DONE", decisionType: "APPROVE", title: "승인" })}>승인</button>
-            </>
-          )}
-          {task.currentState === "PENDING_APPROVAL" && !canApprove && (
-            <button
-              className="button secondary"
-              disabled
-              title="결정 전이 불가: 승인 권한이 필요합니다. 승인자 또는 관리자 권한으로 요청하거나 권한 변경 후 다시 시도하세요."
-            >
-              승인 권한 필요
-            </button>
-          )}
-        </div>
       </div>
 
       {decision && (
@@ -1009,22 +1184,44 @@ function TaskRightPanel({
 function SystemFieldsPanel({
   task,
   members,
+  templates,
+  referenceableTasks,
+  canEditTask,
+  canApprove,
   childrenCount,
   notes,
   comments,
+  onOpenDecision,
   onReload
 }: {
   task: TaskView;
   members: Member[];
+  templates: Template[];
+  referenceableTasks: TaskView[];
+  canEditTask: boolean;
+  canApprove: boolean;
   childrenCount: number;
   notes: Note[];
   comments: ThreadComment[];
+  onOpenDecision: (action: { toState: TaskState; decisionType: DecisionType; title: string }) => void;
   onReload: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [decisionState, setDecisionState] = useState<TaskState>(task.currentState);
+  const [nextActionOpen, setNextActionOpen] = useState(false);
+  const [typeOpen, setTypeOpen] = useState(false);
+  const [fixedFieldsOpen, setFixedFieldsOpen] = useState(false);
+  const shareRef = useRef<HTMLDivElement | null>(null);
+  const nextActionRef = useRef<HTMLDivElement | null>(null);
+  const typeRef = useRef<HTMLDivElement | null>(null);
 
-  const patchTask = async (label: string, patch: Partial<Pick<TaskView, "priority" | "dueDate" | "assigneeIds" | "watcherIds">>) => {
+  const patchTask = async (
+    label: string,
+    patch: Partial<Pick<TaskView, "priority" | "dueDate" | "assigneeIds" | "watcherIds" | "parentId" | "templateId" | "templateType">>
+  ) => {
     try {
       setSaving(label);
       setError(null);
@@ -1040,22 +1237,166 @@ function SystemFieldsPanel({
       setSaving(null);
     }
   };
+  const updateMemberAccess = async (memberId: string, access: TaskAccessLevel) => {
+    const nextAssignees = task.assigneeIds.filter((id) => id !== memberId);
+    const nextWatchers = task.watcherIds.filter((id) => id !== memberId);
+    if (access === "ASSIGNEE") nextAssignees.push(memberId);
+    if (access === "WATCHER") nextWatchers.push(memberId);
+    await patchTask("access", { assigneeIds: nextAssignees, watcherIds: nextWatchers });
+  };
+  const groupedMembers = useMemo(() => {
+    const filtered = members.filter((member) => {
+      const q = memberQuery.trim().toLowerCase();
+      if (!q) return true;
+      return `${member.name} ${member.email} ${member.unit}`.toLowerCase().includes(q);
+    });
+    const groups = new Map<string, Member[]>();
+    filtered.forEach((member) => {
+      const rows = groups.get(member.unit) ?? [];
+      rows.push(member);
+      groups.set(member.unit, rows);
+    });
+    return [...groups.entries()];
+  }, [memberQuery, members]);
+  const assigneePreview = useMemo(() => {
+    const names = task.assigneeIds
+      .map((id) => members.find((member) => member.id === id)?.name)
+      .filter((name): name is string => Boolean(name));
+    if (!names.length) return "담당 미지정";
+    if (names.length === 1) return names[0];
+    return `${names[0]} +${names.length - 1}`;
+  }, [members, task.assigneeIds]);
+  const nextActions = decisionActions(decisionState, canApprove);
+
+  useEffect(() => {
+    setDecisionState(task.currentState);
+  }, [task.currentState, task.id]);
+
+  useEffect(() => {
+    if (!shareOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!shareRef.current?.contains(event.target as Node)) setShareOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [shareOpen]);
+  useEffect(() => {
+    if (!nextActionOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!nextActionRef.current?.contains(event.target as Node)) setNextActionOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [nextActionOpen]);
+  useEffect(() => {
+    if (!typeOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!typeRef.current?.contains(event.target as Node)) setTypeOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [typeOpen]);
 
   return (
-    <aside className="system-panel">
-      <div className="panel-header">
+    <section className="task-system-grid">
+      <div className="task-system-head">
         <PanelTitle title="시스템" />
         {saving && <span className="save-indicator">저장 중</span>}
       </div>
       {error && <p className="form-error">{error}</p>}
-      <Meta label="소유자">{task.owner.name}</Meta>
-      <Meta label="우선순위">
+      <Meta label="상위 항목">
         <Select
           tone="inline"
-          value={task.priority}
-          onChange={(priority) => void patchTask("priority", { priority: priority as TaskView["priority"] })}
-          options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
+          value={task.parentId ?? ""}
+          onChange={(value) => void patchTask("parent", { parentId: value || null })}
+          options={[["", "루트"], ...referenceableTasks.filter((row) => row.id !== task.id).map((row) => [row.id, row.title] as [string, string])]}
+          disabled={!canEditTask}
         />
+      </Meta>
+      <Meta label="템플릿">
+        <Select
+          tone="inline"
+          value={task.templateId ?? ""}
+          onChange={(value) => void patchTask("template", { templateId: value || null })}
+          options={[["", "템플릿 없음"], ...templates.filter((template) => template.enabled || template.id === task.templateId).map((template) => [template.id, template.name] as [string, string])]}
+          disabled={!canEditTask}
+        />
+      </Meta>
+      <Meta label="타입">
+        <div className="next-action-wrap" ref={typeRef}>
+          <button
+            className="state-action-trigger"
+            disabled={!canEditTask}
+            title={canEditTask ? "타입 선택" : "타입 수정 권한이 없습니다."}
+            onClick={() => setTypeOpen((prev) => !prev)}
+          >
+            <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+            <i>{typeOpen ? "▴" : "▾"}</i>
+          </button>
+          {typeOpen && (
+            <div className="next-action-menu">
+              {templateTypes
+                .filter((value): value is TemplateType => value !== "ALL")
+                .map((value) => (
+                  <button
+                    key={value}
+                    className={`next-action-item ${task.templateType === value ? "active" : ""}`}
+                    onClick={() => {
+                      void patchTask("templateType", { templateType: value });
+                      setTypeOpen(false);
+                    }}
+                  >
+                    <strong><Badge tone={TEMPLATE_META[value].tone}>{TEMPLATE_META[value].label}</Badge></strong>
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      </Meta>
+      <Meta label="담당자/공유">
+        <div className="member-share-block" ref={shareRef}>
+          <button
+            type="button"
+            className="member-share-trigger"
+            onClick={() => setShareOpen((prev) => !prev)}
+            aria-haspopup="dialog"
+            aria-expanded={shareOpen}
+          >
+            <span className="member-share-trigger-value">{assigneePreview}</span>
+            <i>{shareOpen ? "▴" : "▾"}</i>
+          </button>
+          {shareOpen && (
+            <div className="member-share-popover">
+              <input value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="이름, 이메일, 조직 검색" />
+              <div className="member-share-list">
+                {groupedMembers.map(([unit, rows]) => (
+                  <div key={unit} className="member-share-group">
+                    <strong>{unit}</strong>
+                    {rows.map((member) => (
+                      <div key={member.id} className="member-share-row">
+                        <div>
+                          <b>{member.name}</b>
+                          <small>{member.email}</small>
+                        </div>
+                        <Select
+                          tone="inline"
+                          value={taskAccessOf(task, member.id)}
+                          onChange={(value) => void updateMemberAccess(member.id, value as TaskAccessLevel)}
+                          options={[
+                            ["VIEW", "보기"],
+                            ["WATCHER", "참관"],
+                            ["ASSIGNEE", "담당"]
+                          ]}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {!groupedMembers.length && <p className="muted">검색 결과가 없습니다.</p>}
+              </div>
+            </div>
+          )}
+        </div>
       </Meta>
       <Meta label="기한">
         <input
@@ -1064,39 +1405,75 @@ function SystemFieldsPanel({
           onChange={(event) => void patchTask("dueDate", { dueDate: event.target.value || null })}
         />
       </Meta>
-      <Meta label="담당자">
-        <div className="check-stack">
-          {members.map((member) => (
-            <label key={member.id}>
-              <input
-                type="checkbox"
-                checked={task.assigneeIds.includes(member.id)}
-                onChange={() => void patchTask("assignees", { assigneeIds: toggleId(task.assigneeIds, member.id) })}
-              />
-              <span>{member.name}</span>
-            </label>
-          ))}
+      <Meta label="우선순위">
+        <Select
+          tone="inline"
+          value={task.priority}
+          onChange={(priority) => void patchTask("priority", { priority: priority as TaskView["priority"] })}
+          options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
+        />
+      </Meta>
+      <Meta label="상태">
+        <div className="next-action-wrap" ref={nextActionRef}>
+          <button
+            className="state-action-trigger"
+            title="상태 및 다음 액션"
+            onClick={() => setNextActionOpen((prev) => !prev)}
+          >
+            <Badge tone={STATE_META[decisionState].tone}>{STATE_META[decisionState].label}</Badge>
+            <i>{nextActionOpen ? "▴" : "▾"}</i>
+          </button>
+          {nextActionOpen && (
+            <div className="next-action-menu">
+              <div className="next-action-head">상태</div>
+              {(["DRAFT", "IN_PROGRESS", "PENDING_APPROVAL", "DONE", "CANCELED"] as TaskState[]).map((state) => (
+                <button
+                  key={state}
+                  className={`next-action-item ${decisionState === state ? "active" : ""}`}
+                  onClick={() => setDecisionState(state)}
+                >
+                  <strong>{STATE_META[state].label}</strong>
+                </button>
+              ))}
+              <div className="next-action-head">넥스트 액션</div>
+              {nextActions.length === 0 && <p className="muted">선택한 상태에서 가능한 액션이 없습니다.</p>}
+              {nextActions.map((action) => (
+                <button
+                  key={`${action.toState}-${action.title}`}
+                  className={`next-action-item tone-${action.tone}`}
+                  onClick={() => {
+                    onOpenDecision(action);
+                    setNextActionOpen(false);
+                  }}
+                >
+                  <strong>{action.title}</strong>
+                  <small>{STATE_META[action.toState].label}로 전환</small>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </Meta>
-      <Meta label="참관자">
-        <div className="check-stack">
-          {members.map((member) => (
-            <label key={member.id}>
-              <input
-                type="checkbox"
-                checked={task.watcherIds.includes(member.id)}
-                onChange={() => void patchTask("watchers", { watcherIds: toggleId(task.watcherIds, member.id) })}
-              />
-              <span>{member.name}</span>
-            </label>
-          ))}
-        </div>
-      </Meta>
-      <Meta label="하위 항목">{childrenCount}</Meta>
-      <Meta label="노트">{notes.length}</Meta>
-      <Meta label="스레드">{comments.length}</Meta>
-      <Meta label="파일">{notes.flatMap((note) => note.attachments).length}</Meta>
-    </aside>
+      <div className="task-system-more">
+        <button className="button secondary" onClick={() => setFixedFieldsOpen((prev) => !prev)}>
+          {fixedFieldsOpen ? "고정 필드 접기" : "고정 필드 더보기"}
+        </button>
+      </div>
+      {fixedFieldsOpen && (
+        <>
+          <Meta label="구조">
+            <div className="badge-field-readonly">
+              <Badge tone={STRUCTURE_META[task.structureState].tone}>{STRUCTURE_META[task.structureState].label}</Badge>
+            </div>
+          </Meta>
+          <Meta label="소유자">{task.owner.name}</Meta>
+          <Meta label="하위 항목">{childrenCount}</Meta>
+          <Meta label="노트">{notes.length}</Meta>
+          <Meta label="스레드">{comments.length}</Meta>
+          <Meta label="파일">{notes.flatMap((note) => note.attachments).length}</Meta>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -1292,6 +1669,7 @@ function ThreadPanel({
   me: Member;
   onReload: () => Promise<void>;
 }) {
+  const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [refs, setRefs] = useState<Set<string>>(new Set());
   const [mentions, setMentions] = useState<Mention[]>([]);
@@ -1304,13 +1682,15 @@ function ThreadPanel({
 
   const submit = async () => {
     if (!content.trim()) return;
+    const mergedContent = title.trim() ? `${title.trim()}\n${content.trim()}` : content.trim();
     try {
       setBusy(true);
       setError(null);
       await request(`/api/tasks/${taskId}/comments`, {
         method: "POST",
-        body: JSON.stringify({ content, referencedNoteIds: [...refs], mentions })
+        body: JSON.stringify({ content: mergedContent, referencedNoteIds: [...refs], mentions })
       });
+      setTitle("");
       setContent("");
       setRefs(new Set());
       setMentions([]);
@@ -1387,61 +1767,76 @@ function ThreadPanel({
 
   return (
     <aside className="thread-panel">
-      <PanelTitle title="스레드" />
       {error && <p className="form-error">{error}</p>}
       <div className="comment-list">
-        {comments.map((comment) => {
+        {comments.map((comment, index) => {
+          const currentDate = new Date(comment.createdAt).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" });
+          const prev = comments[index - 1];
+          const prevDate = prev ? new Date(prev.createdAt).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" }) : null;
+          const showDateDivider = index === 0 || currentDate !== prevDate;
           const canManage = comment.authorId === me.id || me.role === "ADMIN";
           return (
-            <div className="comment" key={comment.id}>
-              <div className="comment-meta">
-                <strong>{memberName(members, comment.authorId)}</strong>
-                <span>{elapsed(comment.createdAt)}</span>
+            <div key={comment.id}>
+              {showDateDivider && <div className="thread-day-divider"><span>{currentDate}</span></div>}
+              <div className="comment">
+                <div className="comment-meta">
+                  <strong>
+                    <span className="comment-author-badge">{memberName(members, comment.authorId).slice(0, 1)}</span>
+                    {memberName(members, comment.authorId)}
+                  </strong>
+                  <span>{elapsed(comment.createdAt)}</span>
+                </div>
+                {editingId === comment.id ? (
+                  <>
+                    <MentionComposer
+                      value={editContent}
+                      onChange={setEditContent}
+                      refs={editRefs}
+                      onRefsChange={setEditRefs}
+                      mentions={editMentions}
+                      onMentionsChange={setEditMentions}
+                      notes={notes}
+                      mentionOptions={mentionOptions}
+                      placeholder="댓글을 수정하세요. @ 또는 #으로 대상을 검색합니다."
+                    />
+                    <div className="row-actions">
+                      <button className="button secondary" disabled={busy} onClick={() => setEditingId(null)}>취소</button>
+                      <button className="button primary" disabled={busy || !editContent.trim()} onClick={() => void saveEdit(comment.id)}>저장</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p>{comment.content}</p>
+                    {comment.referencedNoteIds.length > 0 && (
+                      <div className="ref-list">
+                        {comment.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
+                      </div>
+                    )}
+                    {comment.mentions.length > 0 && (
+                      <div className="ref-list mention-list">
+                        {comment.mentions.map((mention) => <span key={mention.id}>{mention.type === "NOTE" ? "#" : "@"}{mention.label}</span>)}
+                      </div>
+                    )}
+                    {canManage && (
+                      <div className="row-actions left">
+                        <button className="text-button" disabled={busy} onClick={() => startEdit(comment)}>수정</button>
+                        <button className="text-button danger-text" disabled={busy} onClick={() => void deleteComment(comment.id)}>삭제</button>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-              {editingId === comment.id ? (
-                <>
-                  <MentionComposer
-                    value={editContent}
-                    onChange={setEditContent}
-                    refs={editRefs}
-                    onRefsChange={setEditRefs}
-                    mentions={editMentions}
-                    onMentionsChange={setEditMentions}
-                    notes={notes}
-                    mentionOptions={mentionOptions}
-                    placeholder="댓글을 수정하세요. @ 또는 #으로 대상을 검색합니다."
-                  />
-                  <div className="row-actions">
-                    <button className="button secondary" disabled={busy} onClick={() => setEditingId(null)}>취소</button>
-                    <button className="button primary" disabled={busy || !editContent.trim()} onClick={() => void saveEdit(comment.id)}>저장</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p>{comment.content}</p>
-                  {comment.referencedNoteIds.length > 0 && (
-                    <div className="ref-list">
-                      {comment.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
-                    </div>
-                  )}
-                  {comment.mentions.length > 0 && (
-                    <div className="ref-list mention-list">
-                      {comment.mentions.map((mention) => <span key={mention.id}>{mention.type === "NOTE" ? "#" : "@"}{mention.label}</span>)}
-                    </div>
-                  )}
-                  {canManage && (
-                    <div className="row-actions left">
-                      <button className="text-button" disabled={busy} onClick={() => startEdit(comment)}>수정</button>
-                      <button className="text-button danger-text" disabled={busy} onClick={() => void deleteComment(comment.id)}>삭제</button>
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           );
         })}
       </div>
       <div className="composer">
+        <input
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="제목 (선택, 최대 200자)"
+          maxLength={200}
+        />
         <MentionComposer
           value={content}
           onChange={setContent}
@@ -1561,25 +1956,36 @@ function MentionComposer({
 
 function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditForm: boolean; onReload: () => Promise<void> }) {
   const fields = task.template?.formDefinition ?? [];
-  const entries = fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues);
+  const entries = [
+    [TASK_DESCRIPTION_FIELD_KEY, task.description ?? ""] as [string, string],
+    ...(fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues))
+  ];
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => entries.length ? entries : [["", ""]]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextEntries = fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues);
+    const nextEntries = [
+      [TASK_DESCRIPTION_FIELD_KEY, task.description ?? ""] as [string, string],
+      ...(fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues))
+    ];
     setRows(nextEntries.length ? nextEntries : [["", ""]]);
-  }, [task.formValues, task.templateId]);
+  }, [task.description, task.formValues, task.templateId]);
 
   const save = async () => {
     if (!canEditForm) {
       setError("양식 수정 권한이 없습니다. 소유자, 담당자 또는 관리자에게 권한을 요청하세요.");
       return;
     }
-    const next = Object.fromEntries(rows.filter(([key]) => key.trim()).map(([key, value]) => [key.trim(), value.trim()]));
+    const descriptionValue = rows.find(([key]) => key === TASK_DESCRIPTION_FIELD_KEY)?.[1] ?? "";
+    const next = Object.fromEntries(
+      rows
+        .filter(([key]) => key !== TASK_DESCRIPTION_FIELD_KEY && key.trim())
+        .map(([key, value]) => [key.trim(), value.trim()])
+    );
     try {
       setError(null);
-      await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ formValues: next }) });
+      await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ formValues: next, description: descriptionValue.trim() }) });
       setEditing(false);
       await onReload();
     } catch (err) {
@@ -1614,17 +2020,18 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
             <div className="form-output-row" key={`${key}-${index}`}>
               <input
                 value={key}
-                placeholder={field?.label ?? "필드"}
+                placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : field?.label ?? "필드"}
                 maxLength={80}
-                readOnly={Boolean(field)}
+                readOnly={Boolean(field) || key === TASK_DESCRIPTION_FIELD_KEY}
                 onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}
               />
-              {field?.type === "LONG_TEXT" ? (
+              {field?.type === "LONG_TEXT" || key === TASK_DESCRIPTION_FIELD_KEY ? (
                 <textarea
                   value={value}
-                  placeholder={field.helpText ?? "값"}
-                  maxLength={1000}
-                  rows={3}
+                  placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "핵심 맥락과 배경을 구조적으로 작성하세요" : field?.helpText ?? "값"}
+                  maxLength={key === TASK_DESCRIPTION_FIELD_KEY ? 1200 : 1000}
+                  rows={key === TASK_DESCRIPTION_FIELD_KEY ? 8 : 3}
+                  className={key === TASK_DESCRIPTION_FIELD_KEY ? "rich-text-field" : undefined}
                   onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
                 />
               ) : (
@@ -1635,7 +2042,7 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
                   onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
                 />
               )}
-              {!field && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
+              {!field && key !== TASK_DESCRIPTION_FIELD_KEY && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
             </div>
           );
           })}
@@ -1649,8 +2056,8 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
         <div className="kv-grid">
           {entries.length ? entries.map(([key, value]) => (
             <div key={key}>
-              <small>{fields.find((field) => field.key === key)?.label ?? key}</small>
-              <strong>{value}</strong>
+              <small>{key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : fields.find((field) => field.key === key)?.label ?? key}</small>
+              <strong className={key === TASK_DESCRIPTION_FIELD_KEY ? "rich-text-preview" : undefined}>{value}</strong>
             </div>
           )) : <p className="muted">입력된 양식 값이 없습니다</p>}
         </div>
@@ -1669,9 +2076,27 @@ function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]
     const value = window.localStorage.getItem("task-timeline-open-sessions");
     return value ? new Set(value.split(",").filter(Boolean)) : new Set();
   });
+  const [logFilter, setLogFilter] = useState<"all" | "system" | "change" | "decision">("all");
+  const classifyTimelineEvent = (type: string) => {
+    if (["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED", "COMPLETED", "CANCELED"].includes(type)) return "decision";
+    if (["STATE_TRANSITION", "HIERARCHY_CHANGE", "NOTE_UPDATED", "COMMENT"].includes(type)) return "change";
+    return "system";
+  };
+  const filteredTimeline = useMemo(
+    () => (logFilter === "all" ? timeline : timeline.filter((event) => classifyTimelineEvent(event.type) === logFilter)),
+    [logFilter, timeline]
+  );
+  const filterCount = useMemo(() => {
+    const counts = { all: timeline.length, system: 0, change: 0, decision: 0 };
+    timeline.forEach((event) => {
+      const kind = classifyTimelineEvent(event.type);
+      counts[kind] += 1;
+    });
+    return counts;
+  }, [timeline]);
   const sessions = useMemo(() => {
     const rows: Array<{ id: string; representative: TimelineEvent; hidden: TimelineEvent[] }> = [];
-    timeline.forEach((event) => {
+    filteredTimeline.forEach((event) => {
       const minuteKey = new Date(event.createdAt).toISOString().slice(0, 16);
       const previous = rows[rows.length - 1];
       if (previous && new Date(previous.representative.createdAt).toISOString().slice(0, 16) === minuteKey && previous.representative.actorId === event.actorId) {
@@ -1681,7 +2106,7 @@ function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]
       }
     });
     return rows;
-  }, [timeline]);
+  }, [filteredTimeline]);
   const hiddenSessionIds = sessions.filter((session) => session.hidden.length > 0).map((session) => session.id);
   const allOpen = hiddenSessionIds.length > 0 && hiddenSessionIds.every((id) => openSessions.has(id));
   useEffect(() => {
@@ -1717,7 +2142,14 @@ function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]
           </button>
         ) : <button className="button secondary" disabled>전체</button>}
       />
+      <div className="timeline-filter-chips">
+        <button className={`signal-chip ${logFilter === "all" ? "active" : ""}`} onClick={() => setLogFilter("all")}>전체 {filterCount.all}</button>
+        <button className={`signal-chip ${logFilter === "system" ? "active" : ""}`} onClick={() => setLogFilter("system")}>시스템 {filterCount.system}</button>
+        <button className={`signal-chip ${logFilter === "change" ? "active" : ""}`} onClick={() => setLogFilter("change")}>변경 {filterCount.change}</button>
+        <button className={`signal-chip ${logFilter === "decision" ? "active" : ""}`} onClick={() => setLogFilter("decision")}>결정 {filterCount.decision}</button>
+      </div>
       <div className="timeline">
+        {!sessions.length && <p className="muted">선택한 타입의 로그가 없습니다.</p>}
         {sessions.map((session) => {
           const open = openSessions.has(session.id);
           return (
@@ -1845,7 +2277,8 @@ function InboxView({ data, onReload }: { data: AppData; onReload: () => Promise<
   );
 }
 
-function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; members: Member[]; me: Member; onReload: () => Promise<void> }) {
+function TasksView({ tasks, members, me, selectedUnitId, selectedListId, onReload }: { tasks: TaskView[]; members: Member[]; me: Member; selectedUnitId: string; selectedListId: string; onReload: () => Promise<void> }) {
+  const BACKLOG_WIP_LIMIT = 8;
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialViewMode = searchParams.get("view");
   const initialSortBy = searchParams.get("sort");
@@ -1855,7 +2288,6 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
   const initialQuery = searchParams.get("q");
   const initialQuickFilter = searchParams.get("qf");
   const initialAdvancedFilter = searchParams.get("af");
-  const initialTableColumns = searchParams.get("tc");
   const [title, setTitle] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
   const [templateType, setTemplateType] = useState<TemplateType>("TASK");
@@ -1870,7 +2302,7 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
     initialSortBy && ["manual", "updated", "due", "priority"].includes(initialSortBy) ? initialSortBy : "manual"
   );
   const [viewMode, setViewMode] = useState<TaskViewMode>(() =>
-    initialViewMode === "table" || initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "hierarchy" || initialViewMode === "graph" ? initialViewMode : "list"
+    initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "graph" ? initialViewMode : "list"
   );
   const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee">(() =>
     initialGroupBy === "state" || initialGroupBy === "assignee" ? initialGroupBy : "none"
@@ -1878,22 +2310,26 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
   const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">(() =>
     initialQuickFilter === "mine" || initialQuickFilter === "pending" || initialQuickFilter === "due-today" ? initialQuickFilter : "all"
   );
-  const [tableColumns, setTableColumns] = useState(() => {
-    const stored = window.localStorage.getItem("task-table-columns");
-    const source = initialTableColumns ?? stored;
-    if (!source) return { assignee: true, dueDate: true, updatedAt: true, priority: true };
-    const keys = new Set(source.split(",").filter(Boolean));
-    return {
-      assignee: keys.has("assignee"),
-      dueDate: keys.has("dueDate"),
-      updatedAt: keys.has("updatedAt"),
-      priority: keys.has("priority")
-    };
-  });
   const [advancedFilterOpen, setAdvancedFilterOpen] = useState(() =>
     initialAdvancedFilter === "1" || Boolean(initialQuery || initialFilterState || initialFilterType || initialSortBy || initialGroupBy || initialQuickFilter)
   );
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<{ toState: TaskState; label: string } | null>(null);
+  const [bulkFeedback, setBulkFeedback] = useState<string | null>(null);
+  const [moveToast, setMoveToast] = useState<string | null>(null);
+  const [bulkReport, setBulkReport] = useState<{
+    actionLabel: string;
+    total: number;
+    succeeded: Array<{ id: string; title: string }>;
+    failed: Array<{ id: string; title: string; reason: string }>;
+  } | null>(null);
   const meId = me.id;
+
+  useEffect(() => {
+    if (!moveToast) return;
+    const timer = window.setTimeout(() => setMoveToast(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [moveToast]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -1918,21 +2354,13 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
     else url.searchParams.set("q", query.trim());
     if (advancedFilterOpen) url.searchParams.set("af", "1");
     else url.searchParams.delete("af");
-    const activeColumns = (Object.entries(tableColumns).filter(([, enabled]) => enabled).map(([key]) => key) as Array<keyof typeof tableColumns>).join(",");
-    if (activeColumns === "assignee,dueDate,updatedAt,priority") url.searchParams.delete("tc");
-    else url.searchParams.set("tc", activeColumns);
     window.history.replaceState({}, "", `${url.pathname}${url.search}`);
-  }, [advancedFilterOpen, filterState, filterType, groupBy, query, sortBy, tableColumns, viewMode]);
-
-  useEffect(() => {
-    const activeColumns = (Object.entries(tableColumns).filter(([, enabled]) => enabled).map(([key]) => key) as Array<keyof typeof tableColumns>).join(",");
-    window.localStorage.setItem("task-table-columns", activeColumns);
-  }, [tableColumns]);
+  }, [advancedFilterOpen, filterState, filterType, groupBy, query, sortBy, viewMode]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
     if (!title.trim()) return;
-    const task = await request<TaskView>("/api/tasks", { method: "POST", body: JSON.stringify({ title, parentId, templateType }) });
+    const task = await request<TaskView>("/api/tasks", { method: "POST", body: JSON.stringify({ title, parentId, templateType, unitId: selectedUnitId, listId: selectedListId }) });
     setTitle("");
     await onReload();
     go(`/tasks/${task.id}`);
@@ -1957,18 +2385,76 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
   const dragDisabled = sortBy !== "manual" || groupBy !== "none";
   const backlogTasks = filteredTasks.filter((task) => task.currentState === "DRAFT");
   const sprintTasks = filteredTasks.filter((task) => task.currentState !== "DRAFT");
-  const opsMetrics = [
-    ["Scope", filteredTasks.length, `${tasks.length} total`],
-    ["Backlog", backlogTasks.length, "draft queue"],
-    ["Approval", filteredTasks.filter((task) => task.currentState === "PENDING_APPROVAL").length, "decision wait"],
-    ["Templated", filteredTasks.filter((task) => task.structureState === "TEMPLATED").length, "structured"],
-    ["Mentions", filteredTasks.reduce((sum, task) => sum + task.activity.commentsCount, 0), "thread load"],
-    ["Evidence", filteredTasks.reduce((sum, task) => sum + task.activity.notesCount + task.activity.filesCount, 0), "notes/files"]
-  ];
 
   const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => {
     await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
     await onReload();
+  };
+  const moveTaskParent = async (taskId: string, nextParentId: string | null) => {
+    const source = tasks.find((row) => row.id === taskId);
+    const target = nextParentId ? tasks.find((row) => row.id === nextParentId) : null;
+    await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify({ parentId: nextParentId }) });
+    if (source) {
+      setMoveToast(`${source.title}를 ${target ? target.title : "루트"} 하위로 이동`);
+    }
+    await onReload();
+  };
+  const toggleSelectTask = (taskId: string) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(taskId)) next.delete(taskId);
+      else next.add(taskId);
+      return next;
+    });
+  };
+  const selectAllIn = (rows: TaskView[]) => {
+    setSelectedTaskIds((prev) => {
+      const next = new Set(prev);
+      rows.forEach((task) => next.add(task.id));
+      return next;
+    });
+  };
+  const clearSelected = () => setSelectedTaskIds(new Set());
+  const bulkMove = async (toState: TaskState, label: string) => {
+    const ids = [...selectedTaskIds];
+    if (!ids.length) return;
+    const selectedTasks = tasks.filter((task) => ids.includes(task.id));
+    const selectedMap = new Map(selectedTasks.map((task) => [task.id, task]));
+    const toSprintCount = toState === "IN_PROGRESS" ? selectedTasks.filter((task) => task.currentState === "DRAFT").length : 0;
+    if (toState === "IN_PROGRESS" && sprintTasks.length + toSprintCount > BACKLOG_WIP_LIMIT) {
+      setBulkFeedback(formatFailure("스프린트 투입 실패", `WIP 제한 ${BACKLOG_WIP_LIMIT}개를 초과합니다`, "선택 항목 수를 줄이거나 기존 스프린트 태스크를 백로그로 이동한 뒤 다시 시도하세요"));
+      return;
+    }
+    setBulkFeedback(null);
+    const results = await Promise.allSettled(ids.map(async (id) => {
+      await request(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ currentState: toState }) });
+      return id;
+    }));
+    const succeeded: Array<{ id: string; title: string }> = [];
+    const failed: Array<{ id: string; title: string; reason: string }> = [];
+    results.forEach((result, index) => {
+      const id = ids[index];
+      const title = selectedMap.get(id)?.title ?? id;
+      if (result.status === "fulfilled") succeeded.push({ id, title });
+      else failed.push({ id, title, reason: result.reason instanceof Error ? result.reason.message : "알 수 없는 오류" });
+    });
+    if (failed.length > 0) {
+      setBulkFeedback(formatFailure(`${label} 부분 실패`, `${succeeded.length}개 성공, ${failed.length}개 실패`, "실패 항목 상세를 확인한 뒤 권한/상태를 점검하고 재시도하세요"));
+    } else setBulkFeedback(null);
+    setBulkReport({ actionLabel: label, total: ids.length, succeeded, failed });
+    setSelectedTaskIds(new Set());
+    setBulkConfirm(null);
+    await onReload();
+  };
+  const quickMoveTask = async (taskId: string, toState: TaskState, label: string) => {
+    const task = tasks.find((row) => row.id === taskId);
+    if (!task) return;
+    if (toState === "IN_PROGRESS" && task.currentState === "DRAFT" && sprintTasks.length >= BACKLOG_WIP_LIMIT) {
+      setBulkFeedback(formatFailure(`${label} 실패`, `WIP 제한 ${BACKLOG_WIP_LIMIT}개를 초과합니다`, "기존 스프린트 태스크를 백로그로 이동하거나 제한을 조정한 뒤 다시 시도하세요"));
+      return;
+    }
+    setBulkFeedback(null);
+    await patchTask(taskId, { currentState: toState });
   };
   const quickFilterLabel: Record<typeof quickFilter, string> = {
     all: "전체",
@@ -1982,72 +2468,68 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
     filterType !== "ALL" ? `유형 ${TEMPLATE_META[filterType].label}` : null,
     query.trim() ? `검색 '${query.trim()}'` : null
   ].filter(Boolean).join(" · ");
+  const nextActionHint =
+    viewMode === "backlog"
+      ? "권장: 백로그 우선순위를 정리하고 스프린트로 투입하세요."
+      : "권장: 트리 리스트에서 상태/우선순위를 바로 조정하세요.";
 
   return (
     <section className="page-stack">
       <PageHeader eyebrow="태스크" title="실행 관점 목록" action={<Badge tone="blue">{filteredTasks.length} / {tasks.length}</Badge>} />
-      <div className="ops-strip">
-        {opsMetrics.map(([label, value, caption]) => (
-          <article className="ops-cell" key={label}>
-            <small>{label}</small>
-            <strong>{value}</strong>
-            <span>{caption}</span>
-          </article>
-        ))}
-      </div>
-      <section className="tabs-stack">
+      <section className="tabs-stack tabs-inline-row">
         <TaskViewTabs value={viewMode} tasks={tasks} onChange={setViewMode} />
-        <div className="advanced-filter-shell">
-          <div className="advanced-filter-head">
-            <div className="advanced-filter-label">
-              <small className="tabs-section-label">고급 필터</small>
-              <span>{filterSummary || "빠른 필터, 검색, 상태/유형/정렬/그룹을 한 번에 관리합니다."}</span>
-            </div>
-            <button
-              className="filter-toggle-icon"
-              onClick={() => setAdvancedFilterOpen((prev) => !prev)}
-              aria-label={advancedFilterOpen ? "고급 필터 접기" : "고급 필터 펼치기"}
-              title={advancedFilterOpen ? "고급 필터 접기" : "고급 필터 펼치기"}
-            >
-              {advancedFilterOpen ? "−" : "+"}
-            </button>
-          </div>
-          {advancedFilterOpen && (
-            <>
-              <div className="advanced-quick-tabs">
-                <Tabs
-                  variant="segmented"
-                  value={quickFilter}
-                  onChange={(value) => setQuickFilter(value as typeof quickFilter)}
-                  tabs={[
-                    { value: "all", label: "전체", count: tasks.length },
-                    { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
-                    { value: "pending", label: "승인 대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
-                    { value: "due-today", label: "오늘 기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
-                  ]}
-                />
-              </div>
-              <FilterShell
-                meta={<span>{filteredTasks.length}개 표시 · 정렬 {sortBy} · 그룹 {groupBy}</span>}
-                action={<button className="button secondary" onClick={() => { setQuery(""); setFilterState("ALL"); setFilterType("ALL"); setSortBy("manual"); setGroupBy("none"); setQuickFilter("all"); }}>필터 초기화</button>}
-              >
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
-                <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
-                <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
-                <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
-                <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"]]} />
-              </FilterShell>
-            </>
-          )}
+        <div className="advanced-filter-inline">
+          <small className="tabs-section-label">필터</small>
+          <button
+            className="filter-toggle-icon"
+            onClick={() => setAdvancedFilterOpen((prev) => !prev)}
+            aria-label={advancedFilterOpen ? "고급 필터 접기" : "고급 필터 펼치기"}
+            title={filterSummary || "고급 필터"}
+          >
+            {advancedFilterOpen ? "−" : "+"}
+          </button>
         </div>
       </section>
-      <form className="create-card" onSubmit={create}>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
-        <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
-        <Select label="상위" value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "상위 항목 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
-        <button className="button primary">생성</button>
-      </form>
-      {dragDisabled && (viewMode === "list" || viewMode === "table" || viewMode === "backlog") && (
+      {advancedFilterOpen && (
+        <div className="advanced-filter-shell">
+          <div className="advanced-quick-tabs">
+            <Tabs
+              variant="segmented"
+              value={quickFilter}
+              onChange={(value) => setQuickFilter(value as typeof quickFilter)}
+              tabs={[
+                { value: "all", label: "전체", count: tasks.length },
+                { value: "mine", label: "내 할 일", count: tasks.filter((task) => task.assigneeIds.includes(meId) || task.ownerId === meId).length },
+                { value: "pending", label: "승인 대기", count: tasks.filter((task) => task.currentState === "PENDING_APPROVAL").length },
+                { value: "due-today", label: "오늘 기한", count: tasks.filter((task) => isDueToday(task.dueDate)).length }
+              ]}
+            />
+          </div>
+          <FilterShell
+            meta={<span>{filteredTasks.length}개 표시 · 정렬 {sortBy} · 그룹 {groupBy}</span>}
+            action={<button className="button secondary" onClick={() => { setQuery(""); setFilterState("ALL"); setFilterType("ALL"); setSortBy("manual"); setGroupBy("none"); setQuickFilter("all"); }}>필터 초기화</button>}
+          >
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목 또는 설명 검색" />
+            <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
+            <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
+            <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
+            <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"]]} />
+          </FilterShell>
+        </div>
+      )}
+      {viewMode !== "list" && (
+        <form className="create-card" onSubmit={create}>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
+          <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
+          <Select label="상위" value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "상위 항목 없음"], ...tasks.map((task) => [task.id, task.title] as [string, string])]} />
+          <button className="button primary">생성</button>
+        </form>
+      )}
+      <div className="context-ribbon">
+        <strong>{nextActionHint}</strong>
+        <span>{filterSummary || "필터 없음 · 전체 컨텍스트에서 작업 중"}</span>
+      </div>
+      {dragDisabled && (viewMode === "list" || viewMode === "backlog") && (
         <div className="sort-banner">
           <strong>정렬/그룹 중</strong>
           <span>수동 순서 이동은 정렬/그룹이 모두 꺼져 있을 때 활성화됩니다.</span>
@@ -2056,18 +2538,60 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
       )}
       {viewMode === "board" ? (
         <TaskBoardView tasks={filteredTasks} members={members} onPatch={patchTask} />
-      ) : viewMode === "table" ? (
-        <TaskTableView
-          tasks={filteredTasks}
-          members={members}
-          columns={tableColumns}
-          onToggleColumn={(key) => setTableColumns((prev) => ({ ...prev, [key]: !prev[key] }))}
-          onPatch={patchTask}
-        />
       ) : viewMode === "backlog" ? (
         <div className="backlog-layout">
-          <TaskListPanel title="백로그" tasks={backlogTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
-          <TaskListPanel title="현재 스프린트" tasks={sprintTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+          <div className="wip-banner">
+            <strong>백로그 WIP 제한</strong>
+            <span>
+              현재 스프린트 {sprintTasks.length} / 제한 {BACKLOG_WIP_LIMIT}
+            </span>
+          </div>
+          <div className="wip-progress">
+            <span className="wip-progress-label">스프린트 슬롯</span>
+            <div className="wip-progress-track">
+              <b style={{ width: `${Math.min(100, Math.round((sprintTasks.length / BACKLOG_WIP_LIMIT) * 100))}%` }} />
+            </div>
+            <span className={sprintTasks.length >= BACKLOG_WIP_LIMIT ? "danger-text" : ""}>
+              남은 슬롯 {Math.max(0, BACKLOG_WIP_LIMIT - sprintTasks.length)}
+            </span>
+          </div>
+          {bulkFeedback && <div className="inline-error">{bulkFeedback}</div>}
+          {selectedTaskIds.size > 0 && (
+            <div className="bulk-action-bar">
+              <strong>{selectedTaskIds.size}개 선택됨</strong>
+              <div className="row-actions">
+                <button className="button secondary" onClick={() => setBulkConfirm({ toState: "DRAFT", label: "백로그로 이동" })}>백로그로 이동</button>
+                <button className="button primary" onClick={() => setBulkConfirm({ toState: "IN_PROGRESS", label: "스프린트 투입" })}>스프린트 투입</button>
+                <button className="button secondary" onClick={clearSelected}>선택 해제</button>
+              </div>
+            </div>
+          )}
+          <TaskListPanel
+            title="백로그"
+            tasks={backlogTasks}
+            members={members}
+            dragDisabled={dragDisabled}
+            quickMove={{ label: "스프린트 투입", toState: "IN_PROGRESS" }}
+            onQuickMove={(task) => void quickMoveTask(task.id, "IN_PROGRESS", "스프린트 투입")}
+            selectable
+            selectedTaskIds={selectedTaskIds}
+            onToggleSelect={toggleSelectTask}
+            onSelectAll={() => selectAllIn(backlogTasks)}
+            onPatch={patchTask}
+          />
+          <TaskListPanel
+            title="현재 스프린트"
+            tasks={sprintTasks}
+            members={members}
+            dragDisabled={dragDisabled}
+            quickMove={{ label: "백로그로 이동", toState: "DRAFT" }}
+            onQuickMove={(task) => void quickMoveTask(task.id, "DRAFT", "백로그 이동")}
+            selectable
+            selectedTaskIds={selectedTaskIds}
+            onToggleSelect={toggleSelectTask}
+            onSelectAll={() => selectAllIn(sprintTasks)}
+            onPatch={patchTask}
+          />
         </div>
       ) : groupBy === "state" ? (
         <div className="grouped-list">
@@ -2082,81 +2606,306 @@ function TasksView({ tasks, members, me, onReload }: { tasks: TaskView[]; member
           ))}
         </div>
       ) : (
-        <TaskListPanel title="전체 태스크" tasks={filteredTasks} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
+        <TaskTreeListView
+          tasks={filteredTasks}
+          allTasks={tasks}
+          members={members}
+          dragDisabled={dragDisabled}
+          templateType={templateType}
+          setTemplateType={setTemplateType}
+          onCreate={create}
+          createTitle={title}
+          setCreateTitle={setTitle}
+          parentId={parentId}
+          setParentId={setParentId}
+          onPatch={patchTask}
+          onMoveParent={moveTaskParent}
+        />
       )}
+      {bulkConfirm && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Bulk Action</div>
+                <h2>{bulkConfirm.label}</h2>
+              </div>
+            </div>
+            <p>
+              선택된 {selectedTaskIds.size}개 태스크를 {bulkConfirm.label}합니다. 진행할까요?
+            </p>
+            <div className="row-actions">
+              <button className="button secondary" onClick={() => setBulkConfirm(null)}>취소</button>
+              <button className="button primary" onClick={() => void bulkMove(bulkConfirm.toState, bulkConfirm.label)}>확인</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {bulkReport && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Bulk Report</div>
+                <h2>{bulkReport.actionLabel} 결과</h2>
+              </div>
+            </div>
+            <p>
+              총 {bulkReport.total}개 중 {bulkReport.succeeded.length}개 성공, {bulkReport.failed.length}개 실패
+            </p>
+            {bulkReport.failed.length > 0 && (
+              <div className="bulk-report-list">
+                {bulkReport.failed.map((row) => (
+                  <div key={row.id}>
+                    <strong>{row.title}</strong>
+                    <small>{row.reason}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="row-actions">
+              <button className="button primary" onClick={() => setBulkReport(null)}>닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {moveToast && <div className="move-toast">{moveToast}</div>}
     </section>
   );
 }
 
-function TaskTableView({
+function TaskTreeListView({
   tasks,
+  allTasks,
   members,
-  columns,
-  onToggleColumn,
-  onPatch
+  dragDisabled,
+  templateType,
+  setTemplateType,
+  onCreate,
+  createTitle,
+  setCreateTitle,
+  parentId,
+  setParentId,
+  onPatch,
+  onMoveParent
 }: {
   tasks: TaskView[];
+  allTasks: TaskView[];
   members: Member[];
-  columns: { assignee: boolean; dueDate: boolean; updatedAt: boolean; priority: boolean };
-  onToggleColumn: (key: "assignee" | "dueDate" | "updatedAt" | "priority") => void;
+  dragDisabled: boolean;
+  templateType: TemplateType;
+  setTemplateType: (value: TemplateType) => void;
+  onCreate: (event: FormEvent) => Promise<void>;
+  createTitle: string;
+  setCreateTitle: (value: string) => void;
+  parentId: string | null;
+  setParentId: (value: string | null) => void;
   onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
+  onMoveParent: (taskId: string, nextParentId: string | null) => Promise<void>;
 }) {
-  const tableGridTemplate = [
-    "minmax(280px, 1.6fr)",
-    "minmax(140px, 0.7fr)",
-    ...(columns.priority ? ["minmax(120px, 0.55fr)"] : []),
-    ...(columns.assignee ? ["minmax(180px, 0.8fr)"] : []),
-    ...(columns.dueDate ? ["minmax(110px, 0.55fr)"] : []),
-    ...(columns.updatedAt ? ["minmax(110px, 0.55fr)"] : [])
-  ].join(" ");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(tasks.map((task) => task.id)));
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dropTargetTaskId, setDropTargetTaskId] = useState<string | null>(null);
+  const byParent = useMemo(() => {
+    const rows = new Map<string | null, TaskView[]>();
+    const visible = new Set(tasks.map((task) => task.id));
+    tasks.forEach((task) => {
+      const key = task.parentId && visible.has(task.parentId) ? task.parentId : null;
+      const bucket = rows.get(key) ?? [];
+      bucket.push(task);
+      bucket.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      rows.set(key, bucket);
+    });
+    return rows;
+  }, [tasks]);
+  const allByParent = useMemo(() => {
+    const rows = new Map<string | null, TaskView[]>();
+    allTasks.forEach((task) => {
+      const key = task.parentId ?? null;
+      const bucket = rows.get(key) ?? [];
+      bucket.push(task);
+      rows.set(key, bucket);
+    });
+    return rows;
+  }, [allTasks]);
+  const flatRows = useMemo(() => {
+    const rows: TaskView[] = [];
+    const walk = (parentId: string | null) => {
+      (byParent.get(parentId) ?? []).forEach((row) => {
+        rows.push(row);
+        if (expanded.has(row.id)) walk(row.id);
+      });
+    };
+    walk(null);
+    return rows;
+  }, [byParent, expanded]);
+  const toggle = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!flatRows.length) return;
+    const activeId = focusedTaskId ?? flatRows[0].id;
+    const index = Math.max(0, flatRows.findIndex((row) => row.id === activeId));
+    if (event.key === "ArrowDown" || event.key.toLowerCase() === "j") {
+      event.preventDefault();
+      setFocusedTaskId(flatRows[Math.min(flatRows.length - 1, index + 1)].id);
+    }
+    if (event.key === "ArrowUp" || event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      setFocusedTaskId(flatRows[Math.max(0, index - 1)].id);
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      go(`/tasks/${activeId}`);
+    }
+  };
+  const isDescendant = (ancestorId: string, targetId: string) => {
+    const stack = [...(allByParent.get(ancestorId) ?? [])];
+    while (stack.length) {
+      const row = stack.pop()!;
+      if (row.id === targetId) return true;
+      stack.push(...(allByParent.get(row.id) ?? []));
+    }
+    return false;
+  };
+  const moveByDrop = async (targetParentId: string | null) => {
+    if (!draggingTaskId) return;
+    if (targetParentId === draggingTaskId) return;
+    if (targetParentId && isDescendant(draggingTaskId, targetParentId)) return;
+    await onMoveParent(draggingTaskId, targetParentId);
+    setDraggingTaskId(null);
+    setDropTargetTaskId(null);
+  };
+
   return (
-    <section className="task-list-panel table-view-panel">
-      <div className="table-view-toolbar">
-        <strong>테이블 컬럼</strong>
-        <div className="table-column-toggles">
-          <button className={`button ${columns.assignee ? "primary" : "secondary"}`} onClick={() => onToggleColumn("assignee")}>담당자</button>
-          <button className={`button ${columns.dueDate ? "primary" : "secondary"}`} onClick={() => onToggleColumn("dueDate")}>기한</button>
-          <button className={`button ${columns.updatedAt ? "primary" : "secondary"}`} onClick={() => onToggleColumn("updatedAt")}>수정일</button>
-          <button className={`button ${columns.priority ? "primary" : "secondary"}`} onClick={() => onToggleColumn("priority")}>우선순위</button>
+    <section className="task-list-panel tree-list-panel">
+      <div className="task-table tree-mode" tabIndex={0} onKeyDown={onKeyDown}>
+        <div
+          className={`root-drop-zone ${dropTargetTaskId === "root" ? "active" : ""}`}
+          onDragOver={(event) => {
+            if (!draggingTaskId) return;
+            event.preventDefault();
+            setDropTargetTaskId("root");
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            void moveByDrop(null);
+          }}
+        >
+          루트로 이동
         </div>
-      </div>
-      <div className="task-table table-mode">
-        <div className="task-row table-row table-head" style={{ gridTemplateColumns: tableGridTemplate }}>
-          <span>제목</span>
+        <div className="task-row rich-row table-head">
+          <span />
+          <span>태스크</span>
+          <span>담당/활동</span>
           <span>상태</span>
-          {columns.priority && <span>우선순위</span>}
-          {columns.assignee && <span>담당자</span>}
-          {columns.dueDate && <span>기한</span>}
-          {columns.updatedAt && <span>수정일</span>}
+          <span>우선순위</span>
         </div>
-        {tasks.map((task) => (
-          <div className="task-row table-row" key={task.id} style={{ gridTemplateColumns: tableGridTemplate }}>
-            <button className="task-open-cell table-title-cell" onClick={() => go(`/tasks/${task.id}`)}>
-              <strong>{task.title}</strong>
-              <small>{templateLabel(task.templateType)} · {STRUCTURE_META[task.structureState].label}</small>
-            </button>
-            <Select
-              tone="inline"
-              value={task.currentState}
-              onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })}
-              options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])}
-            />
-            {columns.priority && (
-              <Select
-                tone="inline"
-                value={task.priority}
-                onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })}
-                options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
-              />
-            )}
-            {columns.assignee && <span>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</span>}
-            {columns.dueDate && <span>{formatDate(task.dueDate)}</span>}
-            {columns.updatedAt && <span>{formatDate(task.updatedAt)}</span>}
-          </div>
+        {(byParent.get(null) ?? []).map((task) => (
+          <TaskTreeRow key={task.id} task={task} level={0} byParent={byParent} expanded={expanded} onToggle={toggle} members={members} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={moveByDrop} />
         ))}
         {!tasks.length && <div className="empty-row">표시할 태스크가 없습니다.</div>}
       </div>
+      <form className="inline-add-task" onSubmit={(event) => void onCreate(event)}>
+        <input value={createTitle} onChange={(event) => setCreateTitle(event.target.value)} placeholder="+ 태스크 추가" />
+        <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
+        <Select label="상위" value={parentId ?? ""} onChange={(v) => setParentId(v || null)} options={[["", "루트"], ...allTasks.map((task) => [task.id, task.title] as [string, string])]} />
+        <button className="button primary" disabled={!createTitle.trim()}>추가</button>
+      </form>
     </section>
+  );
+}
+
+function TaskTreeRow({
+  task,
+  level,
+  byParent,
+  expanded,
+  onToggle,
+  members,
+  dragDisabled,
+  onPatch,
+  focusedTaskId,
+  setFocusedTaskId,
+  draggingTaskId,
+  dropTargetTaskId,
+  setDraggingTaskId,
+  setDropTargetTaskId,
+  onDropParent
+}: {
+  task: TaskView;
+  level: number;
+  byParent: Map<string | null, TaskView[]>;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  members: Member[];
+  dragDisabled: boolean;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
+  focusedTaskId: string | null;
+  setFocusedTaskId: (id: string) => void;
+  draggingTaskId: string | null;
+  dropTargetTaskId: string | null;
+  setDraggingTaskId: (id: string | null) => void;
+  setDropTargetTaskId: (id: string | null) => void;
+  onDropParent: (parentId: string | null) => Promise<void>;
+}) {
+  const children = byParent.get(task.id) ?? [];
+  const open = expanded.has(task.id);
+  return (
+    <>
+      <div
+        className={`task-row rich-row priority-${task.priority.toLowerCase()} ${dropTargetTaskId === task.id ? "drop-target" : ""}`}
+        onDragOver={(event) => {
+          if (!draggingTaskId) return;
+          event.preventDefault();
+          setDropTargetTaskId(task.id);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          void onDropParent(task.id);
+        }}
+      >
+        <div className="row-left-actions">
+          <button className={`drag-handle ${dragDisabled ? "disabled" : ""}`} title={dragDisabled ? "정렬 또는 그룹 중에는 순서 이동이 비활성화됩니다." : "수동 순서 이동"}>⠿</button>
+        </div>
+        <div className="task-open-cell tree-open-cell" style={{ paddingLeft: `${level * 18}px` }}>
+          <button className="tree-inline-toggle" onClick={() => children.length && onToggle(task.id)}>{children.length ? (open ? "▾" : "▸") : "·"}</button>
+          <button
+            className={`task-tree-title ${focusedTaskId === task.id ? "focused" : ""}`}
+            onClick={() => go(`/tasks/${task.id}`)}
+            onFocus={() => setFocusedTaskId(task.id)}
+            draggable
+            onDragStart={() => setDraggingTaskId(task.id)}
+            onDragEnd={() => {
+              setDraggingTaskId(null);
+              setDropTargetTaskId(null);
+            }}
+          >
+            <strong>{task.title}</strong>
+            <small>{templateLabel(task.templateType)} · {STRUCTURE_META[task.structureState].label}</small>
+          </button>
+          <div className="tree-inline-actions">
+            <button className="text-button" onClick={() => void onPatch(task.id, { currentState: "IN_PROGRESS" })}>투입</button>
+            <button className="text-button" onClick={() => void onPatch(task.id, { currentState: "DRAFT" })}>백로그</button>
+          </div>
+        </div>
+        <span className="owner-cell">
+          <strong>{task.assigneeIds.map((id) => memberName(members, id)).join(", ") || "미지정"}</strong>
+          <small>활동 {densitySignal(task)}</small>
+        </span>
+        <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])} />
+        <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
+      </div>
+      {open && children.map((child) => (
+        <TaskTreeRow key={child.id} task={child} level={level + 1} byParent={byParent} expanded={expanded} onToggle={onToggle} members={members} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={onDropParent} />
+      ))}
+    </>
   );
 }
 
@@ -2165,19 +2914,35 @@ function TaskListPanel({
   tasks,
   members,
   dragDisabled,
+  quickMove,
+  onQuickMove,
+  selectable,
+  selectedTaskIds,
+  onToggleSelect,
+  onSelectAll,
   onPatch
 }: {
   title: string;
   tasks: TaskView[];
   members: Member[];
   dragDisabled: boolean;
+  quickMove?: { label: string; toState: TaskState };
+  onQuickMove?: (task: TaskView) => void;
+  selectable?: boolean;
+  selectedTaskIds?: Set<string>;
+  onToggleSelect?: (taskId: string) => void;
+  onSelectAll?: () => void;
   onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId">>) => Promise<void>;
 }) {
+  const selectedCount = tasks.filter((task) => selectedTaskIds?.has(task.id)).length;
   return (
     <section className="task-list-panel">
       <div className="task-list-head">
         <strong>{title}</strong>
-        <span>{tasks.length}</span>
+        <span>{selectedCount > 0 ? `${selectedCount}/${tasks.length}` : tasks.length}</span>
+        {selectable && onSelectAll && (
+          <button className="text-button" onClick={onSelectAll}>전체 선택</button>
+        )}
       </div>
       <div className="task-table">
         <div className="task-row rich-row table-head">
@@ -2189,7 +2954,22 @@ function TaskListPanel({
         </div>
         {tasks.map((task) => (
           <div key={task.id} className={`task-row rich-row priority-${task.priority.toLowerCase()}`}>
-            <button className={`drag-handle ${dragDisabled ? "disabled" : ""}`} title={dragDisabled ? "정렬 또는 그룹 중에는 순서 이동이 비활성화됩니다." : "수동 순서 이동"}>⠿</button>
+            <div className="row-left-actions">
+              {selectable && onToggleSelect && (
+                <label className="row-select-check">
+                  <input type="checkbox" checked={Boolean(selectedTaskIds?.has(task.id))} onChange={() => onToggleSelect(task.id)} />
+                </label>
+              )}
+              <button className={`drag-handle ${dragDisabled ? "disabled" : ""}`} title={dragDisabled ? "정렬 또는 그룹 중에는 순서 이동이 비활성화됩니다." : "수동 순서 이동"}>⠿</button>
+              {quickMove && task.currentState !== quickMove.toState && (
+                <button className="text-button quick-move-button" onClick={() => {
+                  if (onQuickMove) onQuickMove(task);
+                  else void onPatch(task.id, { currentState: quickMove.toState });
+                }}>
+                  {quickMove.label}
+                </button>
+              )}
+            </div>
             <button className="task-open-cell" onClick={() => go(`/tasks/${task.id}`)}>
               <span className="object-main">
                 <strong>{task.title}</strong>
