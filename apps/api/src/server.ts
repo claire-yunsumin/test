@@ -51,8 +51,8 @@ function approversByPolicy(policy: ApprovalPolicy) {
   if (policy.approverType === "MEMBER") {
     return new Set((policy.approverIds ?? []).filter((id) => byId(data.members, id)));
   }
-  const role = policy.approverRole ?? "APPROVER";
-  return new Set(data.members.filter((member) => member.role === role || member.role === "ADMIN").map((member) => member.id));
+  const role = policy.approverRole ?? "OWNER";
+  return new Set(data.members.filter((member) => member.role === role || member.role === "ADMIN" || member.role === "SUPER_ADMIN").map((member) => member.id));
 }
 
 function isAllowedTransition(fromState: TaskState, toState: TaskState, decisionType: DecisionType) {
@@ -188,6 +188,7 @@ app.get("/api/bootstrap", (req, res) => {
       item.userId === user.id
       || item.sourceUserId === user.id
       || user.role === "ADMIN"
+      || user.role === "SUPER_ADMIN"
     ),
     notificationSettings: data.notificationSettings.filter((row) => row.userId === user.id),
     webPushSubscriptions: data.webPushSubscriptions.filter((row) => row.userId === user.id)
@@ -225,47 +226,75 @@ app.get("/api/units", (_req, res) => {
 });
 
 app.post("/api/units", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
     name: text(1, 60),
     purpose: optionalText(80),
-    defaultApprovalPolicyId: z.string().nullable().optional()
+    defaultApprovalPolicyId: z.string().nullable().optional(),
+    notificationConfig: z.object({
+      mentionEnabled: z.boolean(),
+      approvalRequestEnabled: z.boolean(),
+      dueSoonEnabled: z.boolean(),
+      digestEnabled: z.boolean()
+    }).optional()
   }).parse(req.body);
   if (body.defaultApprovalPolicyId && !byId(data.approvalPolicies, body.defaultApprovalPolicyId)) {
     res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
     return;
   }
+  if (body.defaultApprovalPolicyId) {
+    const policy = byId(data.approvalPolicies, body.defaultApprovalPolicyId);
+    if (policy?.unitId) {
+      res.status(400).json({ error: "INVALID_APPROVAL_POLICY_SCOPE", requestId: req.requestId });
+      return;
+    }
+  }
   const unit = {
     id: `unit-${crypto.randomUUID()}`,
     name: body.name.trim(),
     purpose: body.purpose?.trim() || "업무 목적 미정",
-    defaultApprovalPolicyId: body.defaultApprovalPolicyId ?? null
+    defaultApprovalPolicyId: body.defaultApprovalPolicyId ?? null,
+    notificationConfig: body.notificationConfig
   };
   data.units.push(unit);
   res.status(201).json(unit);
 });
 
 app.patch("/api/units/:unitId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const unit = byId(data.units, req.params.unitId);
   if (!unit) return res.status(404).json({ error: "UNIT_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
     name: optionalText(60),
     purpose: optionalText(80),
-    defaultApprovalPolicyId: z.string().nullable().optional()
+    defaultApprovalPolicyId: z.string().nullable().optional(),
+    notificationConfig: z.object({
+      mentionEnabled: z.boolean(),
+      approvalRequestEnabled: z.boolean(),
+      dueSoonEnabled: z.boolean(),
+      digestEnabled: z.boolean()
+    }).optional()
   }).parse(req.body);
   if (body.defaultApprovalPolicyId && !byId(data.approvalPolicies, body.defaultApprovalPolicyId)) {
     res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
     return;
   }
+  if (body.defaultApprovalPolicyId) {
+    const policy = byId(data.approvalPolicies, body.defaultApprovalPolicyId);
+    if (policy?.unitId && policy.unitId !== unit.id) {
+      res.status(400).json({ error: "INVALID_APPROVAL_POLICY_SCOPE", requestId: req.requestId });
+      return;
+    }
+  }
   if (body.name !== undefined) unit.name = body.name.trim();
   if (body.purpose !== undefined) unit.purpose = body.purpose.trim();
   if (body.defaultApprovalPolicyId !== undefined) unit.defaultApprovalPolicyId = body.defaultApprovalPolicyId;
+  if (body.notificationConfig !== undefined) unit.notificationConfig = body.notificationConfig;
   res.json(unit);
 });
 
 app.delete("/api/units/:unitId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const unit = byId(data.units, req.params.unitId);
   if (!unit) return res.status(404).json({ error: "UNIT_NOT_FOUND", requestId: req.requestId });
   const hasChildren = data.folders.some((folder) => folder.unitId === unit.id)
@@ -280,6 +309,47 @@ app.delete("/api/units/:unitId", (req, res) => {
   res.json({ ok: true, unitId: unit.id });
 });
 
+app.patch("/api/units/:unitId/members/:memberId", (req, res) => {
+  const unit = byId(data.units, req.params.unitId);
+  if (!unit) return res.status(404).json({ error: "UNIT_NOT_FOUND", requestId: req.requestId });
+  const actorId = meId(req);
+  const isAdmin = req.user?.role === "ADMIN" || req.user?.role === "SUPER_ADMIN";
+  const isUnitOwner = data.unitMembers.some((row) => row.unitId === unit.id && row.memberId === actorId && row.role === "OWNER");
+  if (!isAdmin && !isUnitOwner) {
+    res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
+    return;
+  }
+  const body = z.object({ role: z.enum(["OWNER", "MEMBER"]) }).parse(req.body);
+  const member = byId(data.members, req.params.memberId);
+  if (!member) return res.status(404).json({ error: "MEMBER_NOT_FOUND", requestId: req.requestId });
+  const row = data.unitMembers.find((item) => item.unitId === unit.id && item.memberId === member.id);
+  if (!row) return res.status(404).json({ error: "UNIT_MEMBER_NOT_FOUND", requestId: req.requestId });
+  row.role = body.role;
+  res.json(row);
+});
+
+app.delete("/api/units/:unitId/members/:memberId", (req, res) => {
+  const unit = byId(data.units, req.params.unitId);
+  if (!unit) return res.status(404).json({ error: "UNIT_NOT_FOUND", requestId: req.requestId });
+  const actorId = meId(req);
+  const isAdmin = req.user?.role === "ADMIN" || req.user?.role === "SUPER_ADMIN";
+  const isUnitOwner = data.unitMembers.some((row) => row.unitId === unit.id && row.memberId === actorId && row.role === "OWNER");
+  if (!isAdmin && !isUnitOwner) {
+    res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
+    return;
+  }
+  const member = byId(data.members, req.params.memberId);
+  if (!member) return res.status(404).json({ error: "MEMBER_NOT_FOUND", requestId: req.requestId });
+  const target = data.unitMembers.find((item) => item.unitId === unit.id && item.memberId === member.id);
+  if (!target) return res.status(404).json({ error: "UNIT_MEMBER_NOT_FOUND", requestId: req.requestId });
+  if (member.id === actorId && target.role === "OWNER") {
+    res.status(400).json({ error: "CANNOT_REMOVE_SELF_OWNER", requestId: req.requestId });
+    return;
+  }
+  data.unitMembers = data.unitMembers.filter((item) => !(item.unitId === unit.id && item.memberId === member.id));
+  res.json({ ok: true, unitId: unit.id, memberId: member.id });
+});
+
 app.get("/api/folders", (req, res) => {
   const unitId = String(req.query.unitId ?? "");
   const rows = unitId ? data.folders.filter((folder) => folder.unitId === unitId) : data.folders;
@@ -287,7 +357,7 @@ app.get("/api/folders", (req, res) => {
 });
 
 app.post("/api/folders", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
     unitId: z.string(),
     name: text(1, 60)
@@ -318,7 +388,7 @@ app.get("/api/buckets", (req, res) => {
 });
 
 app.post("/api/buckets", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
     name: text(1, 40),
     unitId: z.string().nullable().optional(),
@@ -342,7 +412,7 @@ app.post("/api/buckets", (req, res) => {
 });
 
 app.patch("/api/buckets/:bucketId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const bucket = byId(data.buckets, req.params.bucketId);
   if (!bucket) return res.status(404).json({ error: "BUCKET_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
@@ -355,7 +425,7 @@ app.patch("/api/buckets/:bucketId", (req, res) => {
 });
 
 app.delete("/api/buckets/:bucketId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const bucket = byId(data.buckets, req.params.bucketId);
   if (!bucket) return res.status(404).json({ error: "BUCKET_NOT_FOUND", requestId: req.requestId });
   data.buckets = data.buckets.filter((row) => row.id !== bucket.id);
@@ -364,7 +434,7 @@ app.delete("/api/buckets/:bucketId", (req, res) => {
 });
 
 app.post("/api/lists", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
     unitId: z.string(),
     folderId: z.string().nullable().optional(),
@@ -385,7 +455,7 @@ app.post("/api/lists", (req, res) => {
 });
 
 app.patch("/api/lists/:listId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const list = byId(data.lists, req.params.listId);
   if (!list) return res.status(404).json({ error: "LIST_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
@@ -410,7 +480,7 @@ function removeTaskCascade(taskId: string): string[] {
 }
 
 app.post("/api/tasks", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z
     .object({
       title: text(1, 120),
@@ -575,7 +645,7 @@ app.patch("/api/tasks/:taskId", (req, res) => {
 
   const hasFormPatch = patch.formValues !== undefined || patch.description !== undefined;
   const hasTaskPatch = Object.keys(patch).some((key) => key !== "formValues" && key !== "description");
-  if (hasTaskPatch && !requireRole(req, res, "EDITOR")) return;
+  if (hasTaskPatch && !requireRole(req, res, "MEMBER")) return;
   if (hasFormPatch && !canEditForm(req.user!, task)) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
@@ -695,7 +765,7 @@ app.patch("/api/tasks/:taskId", (req, res) => {
 app.delete("/api/tasks/:taskId", (req, res) => {
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
-  const canDelete = req.user!.role === "ADMIN" || task.ownerId === meId(req);
+  const canDelete = req.user!.role === "ADMIN" || req.user!.role === "SUPER_ADMIN" || task.ownerId === meId(req);
   if (!canDelete) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
@@ -719,7 +789,7 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
     .parse(req.body) as { toState: TaskState; toStatusId?: string; decisionType: DecisionType; reason: string; referencedNoteIds: string[]; approvalPolicyId?: string | null };
 
   const isDecision = body.decisionType !== "STATE_ONLY";
-  if (!requireRole(req, res, isDecision ? "APPROVER" : "EDITOR")) return;
+  if (!requireRole(req, res, isDecision ? "OWNER" : "MEMBER")) return;
 	  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
     res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
     return;
@@ -791,7 +861,7 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
 
   const recipients = new Set([...task.assigneeIds, ...task.watcherIds]);
   if (isPendingApprovalStatus(task, targetStatusId)) {
-    const approvers = selectedPolicy ? approversByPolicy(selectedPolicy) : new Set(data.members.filter((member) => ["APPROVER", "ADMIN"].includes(member.role)).map((member) => member.id));
+    const approvers = selectedPolicy ? approversByPolicy(selectedPolicy) : new Set(data.members.filter((member) => ["OWNER", "ADMIN", "SUPER_ADMIN"].includes(member.role)).map((member) => member.id));
     approvers.forEach((id) => recipients.add(id));
   }
   recipients.delete(meId(req));
@@ -817,7 +887,7 @@ app.get("/api/tasks/:taskId/attachments", (req, res) => {
 });
 
 app.post("/api/tasks/:taskId/attachments/file", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
   const body = z.object({
@@ -844,7 +914,7 @@ app.post("/api/tasks/:taskId/attachments/file", (req, res) => {
 });
 
 app.post("/api/tasks/:taskId/attachments/link", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
   const body = z.object({
@@ -869,7 +939,7 @@ app.post("/api/tasks/:taskId/attachments/link", (req, res) => {
 });
 
 app.delete("/api/tasks/:taskId/attachments/:attachmentId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
   const attachment = byId(data.attachments, req.params.attachmentId);
@@ -881,7 +951,7 @@ app.delete("/api/tasks/:taskId/attachments/:attachmentId", (req, res) => {
 });
 
 app.post("/api/tasks/:taskId/notes", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
   const body = z.object({ title: text(1, 120), content: text(0, 5000).default("") }).parse(req.body);
@@ -911,7 +981,7 @@ app.post("/api/tasks/:taskId/notes", (req, res) => {
 });
 
 app.patch("/api/notes/:noteId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const note = byId(data.notes, req.params.noteId);
   if (!note) return res.status(404).json({ error: "NOTE_NOT_FOUND", requestId: req.requestId });
   if (!getVisibleTask(req, res, note.taskId)) return;
@@ -949,7 +1019,7 @@ app.patch("/api/notes/:noteId", (req, res) => {
 });
 
 app.delete("/api/notes/:noteId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const note = byId(data.notes, req.params.noteId);
   if (!note) return res.status(404).json({ error: "NOTE_NOT_FOUND", requestId: req.requestId });
   if (!getVisibleTask(req, res, note.taskId)) return;
@@ -1020,7 +1090,7 @@ app.patch("/api/comments/:commentId", (req, res) => {
   if (!comment) return res.status(404).json({ error: "COMMENT_NOT_FOUND", requestId: req.requestId });
   const task = getVisibleTask(req, res, comment.taskId);
   if (!task) return;
-  if (comment.authorId !== meId(req) && req.user!.role !== "ADMIN") {
+  if (comment.authorId !== meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
@@ -1050,7 +1120,7 @@ app.delete("/api/comments/:commentId", (req, res) => {
   const comment = byId(data.comments, req.params.commentId);
   if (!comment) return res.status(404).json({ error: "COMMENT_NOT_FOUND", requestId: req.requestId });
   if (!getVisibleTask(req, res, comment.taskId)) return;
-  if (comment.authorId !== meId(req) && req.user!.role !== "ADMIN") {
+  if (comment.authorId !== meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
@@ -1062,7 +1132,7 @@ app.get("/api/inbox", (req, res) => {
   const component = String(req.query.componentType ?? "DECISION");
   const rows = data.inbox.filter((item) =>
     item.componentType === component
-    && (item.userId === meId(req) || item.sourceUserId === meId(req) || req.user!.role === "ADMIN")
+    && (item.userId === meId(req) || item.sourceUserId === meId(req) || req.user!.role === "ADMIN" || req.user!.role === "SUPER_ADMIN")
   );
   res.json(rows);
 });
@@ -1070,7 +1140,7 @@ app.get("/api/inbox", (req, res) => {
 app.patch("/api/inbox/:itemId/read", (req, res) => {
   const item = byId(data.inbox, req.params.itemId);
   if (!item) return res.status(404).json({ error: "INBOX_ITEM_NOT_FOUND", requestId: req.requestId });
-  if (item.userId !== meId(req) && req.user!.role !== "ADMIN") {
+  if (item.userId !== meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
@@ -1081,7 +1151,7 @@ app.patch("/api/inbox/:itemId/read", (req, res) => {
 app.patch("/api/inbox/:itemId/ack", (req, res) => {
   const item = byId(data.inbox, req.params.itemId);
   if (!item) return res.status(404).json({ error: "INBOX_ITEM_NOT_FOUND", requestId: req.requestId });
-  if (item.userId !== meId(req) && req.user!.role !== "ADMIN") {
+  if (item.userId !== meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
@@ -1093,11 +1163,11 @@ app.patch("/api/inbox/:itemId/ack", (req, res) => {
 app.post("/api/inbox/:itemId/remind", (req, res) => {
   const item = byId(data.inbox, req.params.itemId);
   if (!item) return res.status(404).json({ error: "INBOX_ITEM_NOT_FOUND", requestId: req.requestId });
-  if (item.sourceUserId !== meId(req) && req.user!.role !== "ADMIN") {
+  if (item.sourceUserId !== meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
-  if (item.userId === meId(req) && req.user!.role !== "ADMIN") {
+  if (item.userId === meId(req) && req.user!.role !== "ADMIN" && req.user!.role !== "SUPER_ADMIN") {
     res.status(400).json({ error: "INVALID_REMIND_TARGET", requestId: req.requestId });
     return;
   }
@@ -1122,7 +1192,7 @@ app.patch("/api/inbox/read-all", (req, res) => {
   const me = meId(req);
   let changed = 0;
   data.inbox.forEach((item) => {
-    const sameUser = item.userId === me || req.user!.role === "ADMIN";
+    const sameUser = item.userId === me || req.user!.role === "ADMIN" || req.user!.role === "SUPER_ADMIN";
     const sameType = !body.componentType || item.componentType === body.componentType;
     if (sameUser && sameType && !item.readAt) {
       item.readAt = now();
@@ -1248,7 +1318,7 @@ app.patch("/api/workflow/statuses", (req, res) => {
 });
 
 app.post("/api/templates", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
     name: text(1, 120),
     type: z.enum(templateTypes),
@@ -1281,7 +1351,7 @@ app.post("/api/templates", (req, res) => {
 });
 
 app.patch("/api/templates/:templateId", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const template = byId(data.templates, req.params.templateId);
   if (!template) return res.status(404).json({ error: "TEMPLATE_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
@@ -1304,7 +1374,7 @@ app.patch("/api/templates/:templateId", (req, res) => {
 });
 
 app.patch("/api/templates/:templateId/workflow", (req, res) => {
-  if (!requireRole(req, res, "EDITOR")) return;
+  if (!requireRole(req, res, "MEMBER")) return;
   const template = byId(data.templates, req.params.templateId);
   if (!template) return res.status(404).json({ error: "TEMPLATE_NOT_FOUND", requestId: req.requestId });
   const body = z.object({
@@ -1394,12 +1464,16 @@ app.post("/api/admin/approval-policies", (req, res) => {
     enabled: z.boolean().default(true),
     mode: z.enum(["SINGLE", "PARALLEL", "CONSENSUS"]).default("SINGLE"),
     approverType: z.enum(["ROLE", "MEMBER"]).default("ROLE"),
-    approverRole: z.enum(["VIEWER", "EDITOR", "APPROVER", "ADMIN"]).optional(),
+    approverRole: z.enum(["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"]).optional(),
     approverIds: z.array(z.string()).max(30).default([]),
     minApprovals: z.number().int().min(1).max(30).default(1),
     approvalLines: z.array(approvalLineSchema).max(10).default([]),
-    finalApproverId: z.string().nullable().optional()
+    finalApproverId: z.string().nullable().optional(),
+    unitId: z.string().nullable().optional()
   }).parse(req.body);
+  if (body.unitId && !byId(data.units, body.unitId)) {
+    return res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+  }
   if (body.approverType === "MEMBER" && !validateMembers(body.approverIds)) {
     res.status(400).json({ error: "INVALID_APPROVER", requestId: req.requestId });
     return;
@@ -1415,11 +1489,12 @@ app.post("/api/admin/approval-policies", (req, res) => {
   const policy: ApprovalPolicy = {
     id: `ap-${crypto.randomUUID()}`,
     name: body.name,
+    unitId: body.unitId ?? null,
     description: body.description ?? undefined,
     enabled: body.enabled,
     mode: body.mode,
     approverType: body.approverType,
-    approverRole: body.approverType === "ROLE" ? (body.approverRole ?? "APPROVER") : undefined,
+    approverRole: body.approverType === "ROLE" ? (body.approverRole ?? "OWNER") : undefined,
     approverIds: body.approverType === "MEMBER" ? body.approverIds : [],
     minApprovals: body.minApprovals,
     approvalLines: body.approvalLines.map((line) => ({
@@ -1452,12 +1527,16 @@ app.patch("/api/admin/approval-policies/:policyId", (req, res) => {
     enabled: z.boolean().optional(),
     mode: z.enum(["SINGLE", "PARALLEL", "CONSENSUS"]).optional(),
     approverType: z.enum(["ROLE", "MEMBER"]).optional(),
-    approverRole: z.enum(["VIEWER", "EDITOR", "APPROVER", "ADMIN"]).optional(),
+    approverRole: z.enum(["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"]).optional(),
     approverIds: z.array(z.string()).max(30).optional(),
     minApprovals: z.number().int().min(1).max(30).optional(),
     approvalLines: z.array(approvalLineSchema).max(10).optional(),
-    finalApproverId: z.string().nullable().optional()
+    finalApproverId: z.string().nullable().optional(),
+    unitId: z.string().nullable().optional()
   }).parse(req.body);
+  if (body.unitId && !byId(data.units, body.unitId)) {
+    return res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
+  }
   if (body.approverIds && !validateMembers(body.approverIds)) {
     res.status(400).json({ error: "INVALID_APPROVER", requestId: req.requestId });
     return;
@@ -1472,7 +1551,7 @@ app.patch("/api/admin/approval-policies/:policyId", (req, res) => {
   }
   Object.assign(policy, body, { updatedAt: now() });
   if ((body.approverType ?? policy.approverType) === "ROLE") {
-    policy.approverRole = body.approverRole ?? policy.approverRole ?? "APPROVER";
+    policy.approverRole = body.approverRole ?? policy.approverRole ?? "OWNER";
     policy.approverIds = [];
   } else {
     policy.approverIds = body.approverIds ?? policy.approverIds ?? [];
@@ -1489,6 +1568,9 @@ app.patch("/api/admin/approval-policies/:policyId", (req, res) => {
   if (body.finalApproverId !== undefined) {
     policy.finalApproverId = body.finalApproverId;
   }
+  if (body.unitId !== undefined) {
+    policy.unitId = body.unitId;
+  }
   res.json(policy);
 });
 
@@ -1500,8 +1582,9 @@ app.get("/api/admin/members", (_req, res) => {
 app.post("/api/admin/invitations", (req, res) => {
   const body = z.object({
     email: z.string().email().max(254).toLowerCase(),
-    role: z.enum(["VIEWER", "EDITOR", "APPROVER", "ADMIN"]),
-    unitId: z.string().optional()
+    role: z.enum(["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"]),
+    unitId: z.string().optional(),
+    unitMemberRole: z.enum(["OWNER", "MEMBER"]).optional()
   }).parse(req.body);
   const invitedUnit = body.unitId ? byId(data.units, body.unitId) : null;
   if (body.unitId && !invitedUnit) {
@@ -1509,25 +1592,37 @@ app.post("/api/admin/invitations", (req, res) => {
     return;
   }
   const userId = meId(req);
-  const isAdmin = req.user?.role === "ADMIN";
+  const isAdmin = req.user?.role === "ADMIN" || req.user?.role === "SUPER_ADMIN";
   const isUnitOwner = Boolean(body.unitId && data.unitMembers.some((row) => row.unitId === body.unitId && row.memberId === userId && row.role === "OWNER"));
   const canInvite = body.unitId ? isAdmin || isUnitOwner : isAdmin;
   if (!canInvite) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
-  if (!isAdmin && body.role === "ADMIN") {
+  if (!isAdmin && (body.role === "ADMIN" || body.role === "SUPER_ADMIN")) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
   }
-  const member = {
+  const existingMember = data.members.find((row) => row.email.toLowerCase() === body.email.toLowerCase());
+  const member = existingMember ?? {
     id: `u-${crypto.randomUUID()}`,
     name: body.email.split("@")[0],
     email: body.email,
     role: body.role,
     unit: invitedUnit?.name ?? "초대됨"
   };
-  data.members.push(member);
+  if (!existingMember) data.members.push(member);
+  if (invitedUnit) {
+    const alreadyJoined = data.unitMembers.find((row) => row.unitId === invitedUnit.id && row.memberId === member.id);
+    if (!alreadyJoined) {
+      data.unitMembers.push({
+        id: `um-${crypto.randomUUID()}`,
+        unitId: invitedUnit.id,
+        memberId: member.id,
+        role: body.unitMemberRole ?? "MEMBER"
+      });
+    }
+  }
   res.status(201).json({ member, inviteUrl: `/invitations/accept?token=demo-${crypto.randomUUID()}` });
 });
 
@@ -1538,8 +1633,8 @@ app.patch("/api/admin/members/:memberId", (req, res) => {
     res.status(404).json({ error: "MEMBER_NOT_FOUND", requestId: req.requestId });
     return;
   }
-  const body = z.object({ role: z.enum(["VIEWER", "EDITOR", "APPROVER", "ADMIN"]) }).parse(req.body);
-  if (member.id === meId(req) && body.role !== "ADMIN") {
+  const body = z.object({ role: z.enum(["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"]) }).parse(req.body);
+  if (member.id === meId(req) && body.role !== "ADMIN" && body.role !== "SUPER_ADMIN") {
     res.status(400).json({ error: "CANNOT_DEMOTE_SELF", requestId: req.requestId });
     return;
   }

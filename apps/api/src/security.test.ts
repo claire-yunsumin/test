@@ -71,15 +71,15 @@ describe("security baseline", () => {
 });
 
 describe("authorization boundaries", () => {
-  test("prevents VIEWER users from creating tasks", async () => {
+  test("allows MEMBER users to create tasks", async () => {
     const { response, body } = await api("/api/tasks", {
       userId: "u-viewer",
       method: "POST",
-      body: JSON.stringify({ title: "Viewer write attempt", templateType: "TASK" })
+      body: JSON.stringify({ title: "Member write attempt", templateType: "TASK" })
     });
 
-    assert.equal(response.status, 403);
-    assert.equal(body.error, "FORBIDDEN");
+    assert.equal(response.status, 201);
+    assert.equal(body.title, "Member write attempt");
   });
 
   test("prevents IDOR access to tasks outside the user's visible scope", async () => {
@@ -131,7 +131,7 @@ describe("authorization boundaries", () => {
     const { response, body } = await api("/api/admin/invitations", {
       userId: "u-pm",
       method: "POST",
-      body: JSON.stringify({ email: "unit.owner.invite@example.com", role: "VIEWER", unitId: "unit-growth" })
+      body: JSON.stringify({ email: "unit.owner.invite@example.com", role: "MEMBER", unitId: "unit-growth" })
     });
 
     assert.equal(response.status, 201);
@@ -142,7 +142,7 @@ describe("authorization boundaries", () => {
     const { response, body } = await api("/api/admin/invitations", {
       userId: "u-viewer",
       method: "POST",
-      body: JSON.stringify({ email: "blocked.invite@example.com", role: "VIEWER", unitId: "unit-growth" })
+      body: JSON.stringify({ email: "blocked.invite@example.com", role: "MEMBER", unitId: "unit-growth" })
     });
 
     assert.equal(response.status, 403);
@@ -595,7 +595,7 @@ describe("admin CRUD smoke path", () => {
 
     const memberInvite = await api("/api/admin/invitations", {
       method: "POST",
-      body: JSON.stringify({ email: "crud.member@example.com", role: "VIEWER", unitId: "unit-growth" })
+      body: JSON.stringify({ email: "crud.member@example.com", role: "MEMBER", unitId: "unit-growth" })
     });
     assert.equal(memberInvite.response.status, 201);
     assert.equal(memberInvite.body.member.unit, "성장 전략");

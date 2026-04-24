@@ -19,7 +19,7 @@ export function meId(req: Request) {
 }
 
 export function isRoleAtLeast(role: Role, required: Role) {
-  const order: Role[] = ["VIEWER", "EDITOR", "APPROVER", "ADMIN"];
+  const order: Role[] = ["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"];
   return order.indexOf(role) >= order.indexOf(required);
 }
 
@@ -48,20 +48,19 @@ export function requireRole(req: Request, res: Response, required: Role) {
 }
 
 export function canEditTask(user: Member) {
-  return isRoleAtLeast(user.role, "EDITOR");
+  return isRoleAtLeast(user.role, "MEMBER");
 }
 
 export function canEditForm(user: Member, task: Task) {
-  if (user.role === "ADMIN") return true;
+  if (user.role === "ADMIN" || user.role === "SUPER_ADMIN") return true;
   return task.ownerId === user.id || task.assigneeIds.includes(user.id);
 }
 
 export function visibleTaskIdsFor(user: Member) {
-  if (user.role === "ADMIN") return new Set(data.tasks.map((task) => task.id));
+  if (user.role === "ADMIN" || user.role === "SUPER_ADMIN") return new Set(data.tasks.map((task) => task.id));
   return new Set(
     data.tasks
       .filter((task) => {
-        if (user.role === "VIEWER") return task.watcherIds.includes(user.id) || task.assigneeIds.includes(user.id);
         return task.assigneeIds.includes(user.id) || task.watcherIds.includes(user.id) || task.ownerId === user.id;
       })
       .flatMap((task) => {

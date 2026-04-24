@@ -3,7 +3,7 @@ export type TaskState = "DRAFT" | "IN_PROGRESS" | "DONE" | "CANCELED";
 export type WorkflowPhase = "BACKLOG" | "PLAN" | "ACTIVE" | "CLOSED";
 export type WorkflowStatusCategory = "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-export type Role = "VIEWER" | "EDITOR" | "APPROVER" | "ADMIN";
+export type Role = "MEMBER" | "OWNER" | "ADMIN" | "SUPER_ADMIN";
 export type DecisionType = "APPROVE" | "REJECT" | "SUPPLEMENT" | "STATE_ONLY";
 export type InboxComponent = "DECISION" | "DISCUSSION" | "AWARENESS" | "RESULT";
 export type StructureState = "FREEFORM" | "TEMPLATED";
@@ -141,9 +141,15 @@ export type Unit = {
   name: string;
   purpose: string;
   defaultApprovalPolicyId?: string | null;
+  notificationConfig?: {
+    mentionEnabled: boolean;
+    approvalRequestEnabled: boolean;
+    dueSoonEnabled: boolean;
+    digestEnabled: boolean;
+  };
 };
 
-export type UnitMemberRole = "OWNER" | "MEMBER" | "VIEWER";
+export type UnitMemberRole = "OWNER" | "MEMBER";
 
 export type UnitMember = {
   id: string;
@@ -267,6 +273,7 @@ export type ApprovalLine = {
 export type ApprovalPolicy = {
   id: string;
   name: string;
+  unitId?: string | null;
   description?: string;
   enabled: boolean;
   mode: ApprovalMode;
@@ -421,17 +428,18 @@ export function createSeedData(): AppData {
     { id: "bucket-idea", unitId: null, listId: null, name: "아이디어", order: 2 }
   ];
   const members: Member[] = [
-    { id: "u-pm", name: "박PM", email: "pm@selvasin4.local", role: "EDITOR", unit: "HWE" },
-    { id: "u-marketing", name: "김매니저", email: "marketing@selvasin4.local", role: "EDITOR", unit: "마케팅" },
-    { id: "u-lead", name: "이팀장", email: "lead@selvasin4.local", role: "APPROVER", unit: "리더십" },
+    { id: "u-pm", name: "박PM", email: "pm@selvasin4.local", role: "MEMBER", unit: "HWE" },
+    { id: "u-marketing", name: "김매니저", email: "marketing@selvasin4.local", role: "MEMBER", unit: "마케팅" },
+    { id: "u-lead", name: "이팀장", email: "lead@selvasin4.local", role: "OWNER", unit: "리더십" },
     { id: "u-admin", name: "관리자", email: "admin@selvasin4.local", role: "ADMIN", unit: "운영" },
-    { id: "u-viewer", name: "정뷰어", email: "viewer@selvasin4.local", role: "VIEWER", unit: "영업" }
+    { id: "u-viewer", name: "정멤버", email: "viewer@selvasin4.local", role: "MEMBER", unit: "영업" },
+    { id: "u-super", name: "수퍼관리자", email: "super@selvasin4.local", role: "SUPER_ADMIN", unit: "전사" }
   ];
   const unitMembers: UnitMember[] = [
     { id: "um-growth-owner", unitId: "unit-growth", memberId: "u-pm", role: "OWNER" },
     { id: "um-growth-member-1", unitId: "unit-growth", memberId: "u-marketing", role: "MEMBER" },
     { id: "um-growth-member-2", unitId: "unit-growth", memberId: "u-lead", role: "MEMBER" },
-    { id: "um-growth-viewer", unitId: "unit-growth", memberId: "u-viewer", role: "VIEWER" },
+    { id: "um-growth-member", unitId: "unit-growth", memberId: "u-viewer", role: "MEMBER" },
     { id: "um-product-owner", unitId: "unit-product", memberId: "u-pm", role: "OWNER" },
     { id: "um-product-member", unitId: "unit-product", memberId: "u-lead", role: "MEMBER" },
     { id: "um-ops-owner", unitId: "unit-ops", memberId: "u-admin", role: "OWNER" }
@@ -516,11 +524,12 @@ export function createSeedData(): AppData {
     {
       id: "ap-default-unit-approver",
       name: "기본 승인자 정책",
-      description: "APPROVER/ADMIN 역할로 단일 승인 요청",
+      unitId: null,
+      description: "OWNER/ADMIN 권한자 단일 승인 요청",
       enabled: true,
       mode: "SINGLE",
       approverType: "ROLE",
-      approverRole: "APPROVER",
+      approverRole: "OWNER",
       approverIds: [],
       minApprovals: 1,
       approvalLines: [{ id: "line-default-approval", type: "APPROVAL", participantIds: ["u-lead"], minApprovals: 1 }],
@@ -531,6 +540,7 @@ export function createSeedData(): AppData {
     {
       id: "ap-growth-consensus",
       name: "성장전략 합의 정책",
+      unitId: "unit-growth",
       description: "지정 멤버 병렬 합의(2인)",
       enabled: true,
       mode: "CONSENSUS",

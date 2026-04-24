@@ -22,6 +22,7 @@ import {
   type TaskList,
   type Unit,
   type UnitMember,
+  type UnitMemberRole,
   type Role,
   type Task,
   type TaskState,
@@ -39,10 +40,10 @@ const templateOrder: TemplateType[] = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT
 const states: Array<"ALL" | TaskState> = ["ALL", "DRAFT", "IN_PROGRESS", "DONE", "CANCELED"];
 const templateTypes: Array<"ALL" | TemplateType> = ["ALL", "VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"];
 const roleLabel: Record<Role, string> = {
-  VIEWER: "뷰어",
-  EDITOR: "편집자",
-  APPROVER: "승인자",
-  ADMIN: "관리자"
+  MEMBER: "유닛 멤버",
+  OWNER: "유닛 오너",
+  ADMIN: "관리자",
+  SUPER_ADMIN: "IT 인프라 담당자"
 };
 const priorityLabel: Record<TaskView["priority"], string> = {
   LOW: "낮음",
@@ -246,8 +247,7 @@ function headerBreadcrumb(route: string, taskId: string | undefined, tasks: Task
   if (route === "/settings/approval-policies") return [{ label: "설정", path: "/settings" }, { label: "전역 승인정책", path: "/settings/approval-policies" }];
   if (route === "/settings/unit") return [{ label: "설정", path: "/settings/profile" }, { label: "유닛", path: "/settings/unit" }];
   if (/^\/units\/[^/]+\/settings$/.test(route)) return [{ label: "유닛", path: route }, { label: "설정", path: route }];
-  if (route === "/settings/members") return [{ label: "설정", path: "/settings/profile" }, { label: "권한 관리", path: "/settings/members" }];
-  if (route === "/settings/permissions") return [{ label: "설정", path: "/settings/profile" }, { label: "전역 권한", path: "/settings/permissions" }];
+  if (route === "/settings/access" || route === "/settings/members" || route === "/settings/permissions") return [{ label: "설정", path: "/settings/profile" }, { label: "사용자 및 권한", path: "/settings/access" }];
   if (route === "/settings/analytics") return [{ label: "설정", path: "/settings/profile" }, { label: "분석", path: "/settings/analytics" }];
   if (route === "/settings/alerts") return [{ label: "설정", path: "/settings/profile" }, { label: "알림 설정", path: "/settings/alerts" }];
   return [{ label: "태스크", path: "/tasks" }];
@@ -354,16 +354,14 @@ export function App() {
         <InboxView data={data} onReload={reload} />
       ) : route.path === "/settings/templates" || route.path === "/templates" ? (
         <TemplatesView templates={data.templates} workflowStatuses={data.workflowStatuses} onReload={reload} />
-      ) : route.path === "/settings/members" ? (
-        <MembersView members={data.members} onReload={reload} />
-      ) : route.path === "/settings/permissions" ? (
-        <AdminPermissionsView onNavigate={go} />
+      ) : route.path === "/settings/access" || route.path === "/settings/members" || route.path === "/settings/permissions" ? (
+        <AccessControlView members={data.members} units={data.units} unitMembers={data.unitMembers} onReload={reload} />
       ) : route.path === "/settings" || route.path === "/settings/profile" ? (
         <ProfileSettingsView me={data.me} onNavigate={go} />
       ) : route.path === "/settings/units" ? (
         <GlobalUnitManagementView units={data.units} onSelectUnit={setUnit} onNavigate={go} onReload={reload} />
       ) : route.path === "/settings/approval-policies" ? (
-        <GlobalApprovalPolicySettingsView approvalPolicies={data.approvalPolicies} members={data.members} onReload={reload} />
+        <GlobalApprovalPolicySettingsView approvalPolicies={data.approvalPolicies} members={data.members} units={data.units} onReload={reload} />
       ) : route.path === "/settings/unit" || /^\/units\/[^/]+\/settings$/.test(route.path) ? (
         <UnitSettingsView
           me={data.me}
@@ -426,8 +424,7 @@ function Shell({
     const row = unitMembers.find((member) => member.unitId === selectedUnitId && member.memberId === me.id);
     if (row?.role === "OWNER") return "유닛 오너";
     if (row?.role === "MEMBER") return "유닛 멤버";
-    if (row?.role === "VIEWER") return "유닛 뷰어";
-    if (me.role === "ADMIN") return "관리자(전역)";
+    if (me.role === "ADMIN" || me.role === "SUPER_ADMIN") return "관리자(전역)";
     return "유닛 외부 사용자";
   }, [me.id, me.role, selectedUnitId, unitMembers]);
   const activeUnit = units.find((unit) => unit.id === selectedUnitId);
@@ -441,18 +438,17 @@ function Shell({
     { path: "/settings", label: "설정", mark: "S" }
   ];
   const currentWorkspaceSettingsItems = [
-    { path: selectedUnitId ? `/units/${selectedUnitId}/settings` : "/settings/unit", label: "유닛 설정", match: (path: string) => path === "/settings/unit" || /^\/units\/[^/]+\/settings$/.test(path) },
-    ...(me.role === "ADMIN" ? [{ path: "/settings/members", label: "권한 관리", match: (path: string) => path === "/settings/members" }] : [])
+    { path: selectedUnitId ? `/units/${selectedUnitId}/settings` : "/settings/unit", label: "유닛 설정", match: (path: string) => path === "/settings/unit" || /^\/units\/[^/]+\/settings$/.test(path) }
   ];
   const globalManagementItems = [
     { path: "/settings/profile", label: "프로필 설정", match: (path: string) => path === "/settings" || path === "/settings/profile" },
     { path: "/settings/alerts", label: "알림 설정", match: (path: string) => path === "/settings/alerts" },
+    ...(me.role === "ADMIN" ? [{ path: "/settings/access", label: "사용자 및 권한", match: (path: string) => ["/settings/access", "/settings/members", "/settings/permissions"].includes(path) }] : []),
     ...(me.role === "ADMIN"
       ? [
           { path: "/settings/units", label: "전역 유닛 관리", match: (path: string) => path === "/settings/units" },
             { path: "/settings/approval-policies", label: "전역 승인정책", match: (path: string) => path === "/settings/approval-policies" },
             { path: "/settings/templates", label: "템플릿 센터", match: (path: string) => path === "/settings/templates" || path === "/templates" },
-          { path: "/settings/permissions", label: "전역 권한", match: (path: string) => path === "/settings/permissions" },
           { path: "/settings/analytics", label: "분석", match: (path: string) => path === "/settings/analytics" }
         ]
       : [])
@@ -618,26 +614,176 @@ function ProfileSettingsView({ me, onNavigate }: { me: Member; onNavigate: (path
         <PanelHeader title="빠른 이동" />
         <div className="row-actions left">
           <button className="button secondary" onClick={() => onNavigate("/tasks")}>태스크로 이동</button>
-          <button className="button secondary" onClick={() => onNavigate("/settings/members")}>멤버 관리</button>
+          <button className="button secondary" onClick={() => onNavigate("/settings/access")}>사용자 및 권한</button>
         </div>
       </section>
     </section>
   );
 }
 
-function AdminPermissionsView({ onNavigate }: { onNavigate: (path: string) => void }) {
+function AdminPermissionsView({ embedded = false }: { embedded?: boolean }) {
   return (
     <section className="page-stack">
-      <PageHeader eyebrow="관리" title="전역 권한 관리" />
+      {!embedded && <PageHeader eyebrow="관리" title="전역 권한 관리" />}
       <section className="panel">
         <PanelHeader title="권한 모델" />
         <div className="kv-grid">
-          <div><small>역할 계층</small><strong>VIEWER → EDITOR → APPROVER → ADMIN</strong></div>
-          <div><small>전역 관리 화면</small><strong>멤버 메뉴에서 역할 변경/삭제 수행</strong></div>
-          <div><small>정책 원칙</small><strong>전역 권한은 계정 레벨, 유닛 권한은 컨텍스트 레벨로 분리</strong></div>
+          <div><small>역할 계층</small><strong>유닛 멤버 → 유닛 오너 → 관리자 → IT 인프라 담당자</strong></div>
+          <div><small>전역 사용자</small><strong>전역 사용자 관리는 계정(신원) 관리만 담당합니다.</strong></div>
+          <div><small>정책 원칙</small><strong>권한은 기능/메뉴/유닛 스코프에서 별도로 부여됩니다.</strong></div>
+          <div><small>역할 해석</small><strong>관리자: 인사팀/C레벨/섹터리드, IT 인프라 담당자: 플랫폼/인프라 운영 책임</strong></div>
         </div>
-        <div className="row-actions left">
-          <button className="button primary" onClick={() => onNavigate("/settings/members")}>멤버 권한 관리 열기</button>
+      </section>
+    </section>
+  );
+}
+
+function AccessControlView({
+  members,
+  units,
+  unitMembers,
+  onReload
+}: {
+  members: Member[];
+  units: Unit[];
+  unitMembers: UnitMember[];
+  onReload: () => Promise<void>;
+}) {
+  const [tab, setTab] = useState<"users" | "policy" | "unitAccess">("users");
+  return (
+    <section className="page-stack">
+      <PageHeader eyebrow="설정" title="사용자 및 권한" />
+      <Tabs
+        value={tab}
+        onChange={(value) => setTab(value as "users" | "policy" | "unitAccess")}
+        tabs={[
+          { value: "users", label: "사용자 관리", count: members.length },
+          { value: "policy", label: "권한 정책" },
+          { value: "unitAccess", label: "유닛 멤버십", count: unitMembers.length }
+        ]}
+      />
+      {tab === "users" ? (
+        <MembersView members={members} onReload={onReload} embedded />
+      ) : tab === "policy" ? (
+        <AdminPermissionsView embedded />
+      ) : (
+        <UnitMembershipView members={members} units={units} unitMembers={unitMembers} onReload={onReload} />
+      )}
+    </section>
+  );
+}
+
+function UnitMembershipView({
+  members,
+  units,
+  unitMembers,
+  onReload
+}: {
+  members: Member[];
+  units: Unit[];
+  unitMembers: UnitMember[];
+  onReload: () => Promise<void>;
+}) {
+  const [memberId, setMemberId] = useState("");
+  const [unitId, setUnitId] = useState("");
+  const [role, setRole] = useState<UnitMemberRole>("MEMBER");
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const rows = unitMembers
+    .map((row) => ({
+      ...row,
+      member: members.find((member) => member.id === row.memberId) ?? null,
+      unit: units.find((unit) => unit.id === row.unitId) ?? null
+    }))
+    .filter((row) => row.member && row.unit);
+  const addMembership = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!memberId || !unitId) return;
+    const member = members.find((row) => row.id === memberId);
+    if (!member) return;
+    try {
+      setBusy(true);
+      setMessage(null);
+      await request("/api/admin/invitations", {
+        method: "POST",
+        body: JSON.stringify({ email: member.email, role: member.role, unitId, unitMemberRole: role })
+      });
+      await onReload();
+      setMessage("유닛 멤버십이 추가되었습니다.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "유닛 멤버십 추가에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const changeMembershipRole = async (targetUnitId: string, targetMemberId: string, nextRole: UnitMemberRole) => {
+    try {
+      setBusy(true);
+      setMessage(null);
+      await request(`/api/units/${targetUnitId}/members/${targetMemberId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: nextRole })
+      });
+      await onReload();
+      setMessage("유닛 멤버십 역할이 변경되었습니다.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "유닛 멤버십 역할 변경에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const removeMembership = async (targetUnitId: string, targetMemberId: string, memberName: string, unitName: string) => {
+    if (!window.confirm(`${memberName} 사용자의 ${unitName} 멤버십을 제거할까요?`)) return;
+    try {
+      setBusy(true);
+      setMessage(null);
+      await request(`/api/units/${targetUnitId}/members/${targetMemberId}`, { method: "DELETE" });
+      await onReload();
+      setMessage("유닛 멤버십이 제거되었습니다.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "유닛 멤버십 제거에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="page-stack">
+      <section className="panel">
+        <PanelHeader title="유닛 멤버십 추가" />
+        <form className="create-card" onSubmit={addMembership}>
+          <Select label="사용자" value={memberId} onChange={setMemberId} options={[["", "사용자 선택"], ...members.map((member) => [member.id, `${member.name} (${member.email})`] as [string, string])]} />
+          <Select label="유닛" value={unitId} onChange={setUnitId} options={[["", "유닛 선택"], ...units.map((unit) => [unit.id, unit.name] as [string, string])]} />
+          <Select label="유닛 역할" value={role} onChange={(value) => setRole(value as UnitMemberRole)} options={[["OWNER", "유닛 오너"], ["MEMBER", "유닛 멤버"]]} />
+          <button className="button primary" disabled={busy || !memberId || !unitId}>추가</button>
+        </form>
+        {message && <div className="inline-error">{message}</div>}
+      </section>
+      <section className="panel">
+        <PanelHeader title="유닛 멤버십 목록" />
+        <div className="task-table">
+          <div className="task-row static">
+            <strong>사용자</strong>
+            <strong>이메일</strong>
+            <strong>유닛</strong>
+            <strong>유닛 역할</strong>
+            <strong>액션</strong>
+          </div>
+          {rows.map((row) => (
+            <div className="task-row static" key={row.id}>
+              <strong>{row.member!.name}</strong>
+              <span>{row.member!.email}</span>
+              <span>{row.unit!.name}</span>
+              <Select
+                tone="inline"
+                value={row.role}
+                onChange={(value) => void changeMembershipRole(row.unitId, row.memberId, value as UnitMemberRole)}
+                options={[["OWNER", "유닛 오너"], ["MEMBER", "유닛 멤버"]]}
+              />
+              <button className="button danger" disabled={busy} onClick={() => void removeMembership(row.unitId, row.memberId, row.member!.name, row.unit!.name)}>
+                제거
+              </button>
+            </div>
+          ))}
         </div>
       </section>
     </section>
@@ -762,22 +908,54 @@ function UnitSettingsView({
   onReload: () => Promise<void>;
 }) {
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<Role>("VIEWER");
+  const [inviteRole, setInviteRole] = useState<Role>("MEMBER");
+  const [inviteUnitRole, setInviteUnitRole] = useState<UnitMemberRole>("MEMBER");
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+  const [memberBusyId, setMemberBusyId] = useState<string | null>(null);
+  const [memberMessage, setMemberMessage] = useState<string | null>(null);
+  const [unitInfoBusy, setUnitInfoBusy] = useState(false);
+  const [unitInfoMessage, setUnitInfoMessage] = useState<string | null>(null);
+  const [unitNameDraft, setUnitNameDraft] = useState(unit?.name ?? "");
+  const [unitPurposeDraft, setUnitPurposeDraft] = useState(unit?.purpose ?? "");
   const [unitPolicyBusy, setUnitPolicyBusy] = useState(false);
   const [unitPolicyMessage, setUnitPolicyMessage] = useState<string | null>(null);
   const [defaultApprovalPolicyId, setDefaultApprovalPolicyId] = useState(unit?.defaultApprovalPolicyId ?? "");
+  const [customPolicyName, setCustomPolicyName] = useState("");
+  const [customPolicyMode, setCustomPolicyMode] = useState<ApprovalPolicy["mode"]>("SINGLE");
+  const [unitNotificationBusy, setUnitNotificationBusy] = useState(false);
+  const [unitNotificationMessage, setUnitNotificationMessage] = useState<string | null>(null);
+  const [unitNotificationConfig, setUnitNotificationConfig] = useState({
+    mentionEnabled: unit?.notificationConfig?.mentionEnabled ?? true,
+    approvalRequestEnabled: unit?.notificationConfig?.approvalRequestEnabled ?? true,
+    dueSoonEnabled: unit?.notificationConfig?.dueSoonEnabled ?? true,
+    digestEnabled: unit?.notificationConfig?.digestEnabled ?? false
+  });
   const relatedMembers = unit
     ? unitMembers
       .filter((row) => row.unitId === unit.id)
       .map((row) => ({ ...row, member: members.find((member) => member.id === row.memberId) }))
       .filter((row) => Boolean(row.member))
     : [];
+  const availableUnitPolicies = approvalPolicies.filter((policy) => policy.enabled && (!policy.unitId || policy.unitId === unit?.id));
+  const myUnitRole = unitMembers.find((row) => row.unitId === unit?.id && row.memberId === me.id)?.role;
   const canInvite = Boolean(unit);
   useEffect(() => {
     setDefaultApprovalPolicyId(unit?.defaultApprovalPolicyId ?? "");
   }, [unit?.id, unit?.defaultApprovalPolicyId]);
+  useEffect(() => {
+    setUnitNameDraft(unit?.name ?? "");
+    setUnitPurposeDraft(unit?.purpose ?? "");
+  }, [unit?.id, unit?.name, unit?.purpose]);
+  useEffect(() => {
+    setUnitNotificationConfig({
+      mentionEnabled: unit?.notificationConfig?.mentionEnabled ?? true,
+      approvalRequestEnabled: unit?.notificationConfig?.approvalRequestEnabled ?? true,
+      dueSoonEnabled: unit?.notificationConfig?.dueSoonEnabled ?? true,
+      digestEnabled: unit?.notificationConfig?.digestEnabled ?? false
+    });
+  }, [unit?.id, unit?.notificationConfig?.mentionEnabled, unit?.notificationConfig?.approvalRequestEnabled, unit?.notificationConfig?.dueSoonEnabled, unit?.notificationConfig?.digestEnabled]);
   const invite = async (event: FormEvent) => {
     event.preventDefault();
     if (!canInvite || !inviteEmail.trim() || !unit) return;
@@ -786,9 +964,11 @@ function UnitSettingsView({
       setInviteMessage(null);
       await request("/api/admin/invitations", {
         method: "POST",
-        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, unitId: unit.id })
+        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, unitId: unit.id, unitMemberRole: inviteUnitRole })
       });
       setInviteEmail("");
+      setInviteUnitRole("MEMBER");
+      setInviteOpen(false);
       await onReload();
       setInviteMessage("유닛 멤버 초대가 생성되었습니다.");
     } catch (err) {
@@ -815,50 +995,234 @@ function UnitSettingsView({
       setUnitPolicyBusy(false);
     }
   };
+  const createUnitCustomPolicy = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!unit || !customPolicyName.trim()) return;
+    try {
+      setUnitPolicyBusy(true);
+      setUnitPolicyMessage(null);
+      await request("/api/admin/approval-policies", {
+        method: "POST",
+        body: JSON.stringify({
+          name: customPolicyName.trim(),
+          description: `${unit.name} 유닛 커스텀 정책`,
+          enabled: true,
+          mode: customPolicyMode,
+          approverType: "ROLE",
+          approverRole: "OWNER",
+          approverIds: [],
+          minApprovals: 1,
+          approvalLines: [],
+          finalApproverId: null,
+          unitId: unit.id
+        })
+      });
+      setCustomPolicyName("");
+      await onReload();
+      setUnitPolicyMessage("유닛 커스텀 승인정책이 생성되었습니다.");
+    } catch (err) {
+      setUnitPolicyMessage(err instanceof Error ? err.message : "유닛 커스텀 승인정책 생성에 실패했습니다.");
+    } finally {
+      setUnitPolicyBusy(false);
+    }
+  };
+  const saveUnitInfo = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!unit || !unitNameDraft.trim()) return;
+    try {
+      setUnitInfoBusy(true);
+      setUnitInfoMessage(null);
+      await request(`/api/units/${unit.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          name: unitNameDraft.trim(),
+          purpose: unitPurposeDraft.trim()
+        })
+      });
+      await onReload();
+      setUnitInfoMessage("유닛 기본 정보가 저장되었습니다.");
+    } catch (err) {
+      setUnitInfoMessage(err instanceof Error ? err.message : "유닛 기본 정보 저장에 실패했습니다.");
+    } finally {
+      setUnitInfoBusy(false);
+    }
+  };
+  const saveUnitNotifications = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!unit) return;
+    try {
+      setUnitNotificationBusy(true);
+      setUnitNotificationMessage(null);
+      await request(`/api/units/${unit.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ notificationConfig: unitNotificationConfig })
+      });
+      await onReload();
+      setUnitNotificationMessage("유닛 알림 설정이 저장되었습니다.");
+    } catch (err) {
+      setUnitNotificationMessage(err instanceof Error ? err.message : "유닛 알림 설정 저장에 실패했습니다.");
+    } finally {
+      setUnitNotificationBusy(false);
+    }
+  };
+  const changeUnitMemberRole = async (memberId: string, role: UnitMemberRole) => {
+    if (!unit) return;
+    try {
+      setMemberBusyId(memberId);
+      setMemberMessage(null);
+      await request(`/api/units/${unit.id}/members/${memberId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role })
+      });
+      await onReload();
+      setMemberMessage("유닛 멤버 역할이 변경되었습니다.");
+    } catch (err) {
+      setMemberMessage(err instanceof Error ? err.message : "유닛 멤버 역할 변경에 실패했습니다.");
+    } finally {
+      setMemberBusyId(null);
+    }
+  };
+  const kickUnitMember = async (memberId: string, memberName: string) => {
+    if (!unit) return;
+    if (!window.confirm(`${memberName} 멤버를 이 유닛에서 제외할까요?`)) return;
+    try {
+      setMemberBusyId(memberId);
+      setMemberMessage(null);
+      await request(`/api/units/${unit.id}/members/${memberId}`, { method: "DELETE" });
+      await onReload();
+      setMemberMessage("유닛 멤버가 제외되었습니다.");
+    } catch (err) {
+      setMemberMessage(err instanceof Error ? err.message : "유닛 멤버 제외에 실패했습니다.");
+    } finally {
+      setMemberBusyId(null);
+    }
+  };
   return (
     <section className="page-stack">
       <PageHeader eyebrow="유닛" title="유닛 설정" />
       <section className="panel">
         <PanelHeader title="현재 유닛" />
-        <div className="kv-grid">
-          <div><small>유닛명</small><strong>{unit?.name ?? "선택된 유닛 없음"}</strong></div>
-          <div><small>유닛 목적</small><strong>{unit?.purpose ?? "-"}</strong></div>
-          <div><small>내 역할</small><strong>{me.role === "ADMIN" ? "유닛 관리자" : "유닛 멤버"}</strong></div>
-        </div>
+        <form className="approval-policy-form" onSubmit={saveUnitInfo}>
+          <div className="policy-basic-grid">
+            <label>
+              유닛명
+              <input
+                value={unitNameDraft}
+                onChange={(event) => setUnitNameDraft(event.target.value)}
+                placeholder="유닛명"
+                disabled={!unit}
+              />
+            </label>
+            <label>
+              유닛 목적(설명)
+              <input
+                value={unitPurposeDraft}
+                onChange={(event) => setUnitPurposeDraft(event.target.value)}
+                placeholder="유닛 목적"
+                disabled={!unit}
+              />
+            </label>
+          </div>
+          <div className="kv-grid">
+            <div><small>내 역할</small><strong>{myUnitRole === "OWNER" ? "유닛 오너" : myUnitRole === "MEMBER" ? "유닛 멤버" : roleLabel[me.role]}</strong></div>
+          </div>
+          <div className="policy-submit-row">
+            <button className="button primary" disabled={!unit || unitInfoBusy || !unitNameDraft.trim()}>
+              {unitInfoBusy ? "저장 중..." : "유닛 정보 저장"}
+            </button>
+          </div>
+        </form>
+        {unitInfoMessage && <div className="inline-error">{unitInfoMessage}</div>}
       </section>
       <section className="panel">
-        <PanelHeader title="유닛 멤버(참고)" />
+        <PanelHeader title="유닛 멤버 관리" />
         <div className="kv-grid">
           <div><small>인원 수</small><strong>{relatedMembers.length}</strong></div>
           <div><small>구성</small><strong>{relatedMembers.map((row) => `${row.member!.name}(${row.role})`).join(", ") || "연결된 멤버 없음"}</strong></div>
         </div>
-        <form className="unit-invite-form" onSubmit={invite}>
-          <label>
-            이메일
-            <input
-              type="email"
-              value={inviteEmail}
-              onChange={(event) => setInviteEmail(event.target.value)}
-              placeholder={canInvite ? "초대할 이메일" : "유닛을 먼저 선택하세요"}
-              disabled={!canInvite || !unit}
-            />
-          </label>
-          <label>
-            역할
-            <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as Role)} disabled={!canInvite || !unit}>
-              <option value="VIEWER">뷰어</option>
-              <option value="EDITOR">편집자</option>
-              <option value="APPROVER">승인자</option>
-            </select>
-          </label>
-          <button className="button primary" disabled={!canInvite || !unit || inviteBusy || !inviteEmail.trim()}>
-            {inviteBusy ? "초대 생성 중..." : "유닛 멤버 초대"}
-          </button>
-        </form>
-        {inviteMessage && <div className="inline-error">{inviteMessage}</div>}
         <div className="row-actions left">
-          <button className="button secondary" onClick={() => onNavigate("/settings/members")}>권한 관리로 이동</button>
+          <button type="button" className="button primary" disabled={!canInvite || !unit} onClick={() => setInviteOpen(true)}>
+            유닛 멤버 초대
+          </button>
         </div>
+        {inviteMessage && <div className="inline-error">{inviteMessage}</div>}
+        {memberMessage && <div className="inline-error">{memberMessage}</div>}
+        <div className="task-table">
+          <div className="task-row static">
+            <strong>이름</strong>
+            <strong>이메일</strong>
+            <strong>전역 역할</strong>
+            <strong>유닛 역할</strong>
+            <strong>액션</strong>
+          </div>
+          {relatedMembers.map((row) => (
+            <div className="task-row static" key={row.id}>
+              <strong>{row.member!.name}</strong>
+              <span>{row.member!.email}</span>
+              <Badge tone="slate">{roleLabel[row.member!.role]}</Badge>
+              <Select
+                tone="inline"
+                value={row.role}
+                onChange={(value) => void changeUnitMemberRole(row.member!.id, value as UnitMemberRole)}
+                options={[["OWNER", "오너"], ["MEMBER", "멤버"]]}
+              />
+              <button
+                className="button danger"
+                disabled={memberBusyId === row.member!.id}
+                onClick={() => void kickUnitMember(row.member!.id, row.member!.name)}
+              >
+                킥
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="row-actions left">
+          <button className="button secondary" onClick={() => onNavigate("/settings/access")}>사용자 및 권한으로 이동</button>
+        </div>
+        {inviteOpen && (
+          <div className="modal-backdrop">
+            <div className="modal">
+              <div className="modal-head">
+                <h3>유닛 멤버 초대</h3>
+                <button type="button" className="button ghost" onClick={() => setInviteOpen(false)}>닫기</button>
+              </div>
+              <form className="unit-invite-form" onSubmit={invite}>
+                <label>
+                  이메일
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    placeholder={canInvite ? "초대할 이메일" : "유닛을 먼저 선택하세요"}
+                    disabled={!canInvite || !unit}
+                  />
+                </label>
+                <label>
+                  전역 역할
+                  <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as Role)} disabled={!canInvite || !unit}>
+                    <option value="MEMBER">멤버</option>
+                    <option value="OWNER">오너</option>
+                    <option value="ADMIN">관리자</option>
+                    <option value="SUPER_ADMIN">수퍼어드민</option>
+                  </select>
+                </label>
+                <label>
+                  유닛 역할
+                  <select value={inviteUnitRole} onChange={(event) => setInviteUnitRole(event.target.value as UnitMemberRole)} disabled={!canInvite || !unit}>
+                    <option value="OWNER">오너</option>
+                    <option value="MEMBER">멤버</option>
+                  </select>
+                </label>
+                <div className="row-actions">
+                  <button type="button" className="button secondary" onClick={() => setInviteOpen(false)}>취소</button>
+                  <button className="button primary" disabled={!canInvite || !unit || inviteBusy || !inviteEmail.trim()}>
+                    {inviteBusy ? "초대 생성 중..." : "초대 생성"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </section>
       <section className="panel">
         <PanelHeader title="유닛 기본 승인정책" />
@@ -868,9 +1232,9 @@ function UnitSettingsView({
               기본 정책
               <select value={defaultApprovalPolicyId} onChange={(event) => setDefaultApprovalPolicyId(event.target.value)} disabled={!unit}>
                 <option value="">없음 (태스크별 선택)</option>
-                {approvalPolicies.filter((policy) => policy.enabled).map((policy) => (
+                {availableUnitPolicies.map((policy) => (
                   <option key={policy.id} value={policy.id}>
-                    {policy.name} ({policy.mode})
+                    {policy.unitId ? `[유닛] ${policy.name}` : `[전역] ${policy.name}`} ({policy.mode})
                   </option>
                 ))}
               </select>
@@ -887,7 +1251,77 @@ function UnitSettingsView({
             </button>
           </div>
         </form>
+        <form className="approval-policy-form" onSubmit={createUnitCustomPolicy}>
+          <div className="policy-basic-grid">
+            <label>
+              커스텀 정책 이름
+              <input value={customPolicyName} onChange={(event) => setCustomPolicyName(event.target.value)} placeholder="예: 제품출시 유닛 빠른승인" disabled={!unit} />
+            </label>
+            <label>
+              정책 모드
+              <select value={customPolicyMode} onChange={(event) => setCustomPolicyMode(event.target.value as ApprovalPolicy["mode"])} disabled={!unit}>
+                <option value="SINGLE">단일</option>
+                <option value="PARALLEL">병렬</option>
+                <option value="CONSENSUS">합의</option>
+              </select>
+            </label>
+          </div>
+          <div className="policy-submit-row">
+            <button className="button secondary" disabled={!unit || unitPolicyBusy || !customPolicyName.trim()}>
+              {unitPolicyBusy ? "생성 중..." : "유닛 커스텀 정책 생성"}
+            </button>
+          </div>
+        </form>
         {unitPolicyMessage && <div className="inline-error">{unitPolicyMessage}</div>}
+      </section>
+      <section className="panel">
+        <PanelHeader title="유닛 알림 설정" />
+        <form className="approval-policy-form" onSubmit={saveUnitNotifications}>
+          <div className="policy-basic-grid">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={unitNotificationConfig.mentionEnabled}
+                onChange={(event) => setUnitNotificationConfig((prev) => ({ ...prev, mentionEnabled: event.target.checked }))}
+                disabled={!unit}
+              />
+              멘션 알림
+            </label>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={unitNotificationConfig.approvalRequestEnabled}
+                onChange={(event) => setUnitNotificationConfig((prev) => ({ ...prev, approvalRequestEnabled: event.target.checked }))}
+                disabled={!unit}
+              />
+              승인 요청 알림
+            </label>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={unitNotificationConfig.dueSoonEnabled}
+                onChange={(event) => setUnitNotificationConfig((prev) => ({ ...prev, dueSoonEnabled: event.target.checked }))}
+                disabled={!unit}
+              />
+              마감 임박 알림
+            </label>
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={unitNotificationConfig.digestEnabled}
+                onChange={(event) => setUnitNotificationConfig((prev) => ({ ...prev, digestEnabled: event.target.checked }))}
+                disabled={!unit}
+              />
+              하루 한 번 요약 알림
+            </label>
+          </div>
+          <div className="policy-submit-row">
+            <button className="button primary" disabled={!unit || unitNotificationBusy}>
+              {unitNotificationBusy ? "저장 중..." : "유닛 알림 설정 저장"}
+            </button>
+          </div>
+        </form>
+        {unitNotificationMessage && <div className="inline-error">{unitNotificationMessage}</div>}
       </section>
     </section>
   );
@@ -896,10 +1330,12 @@ function UnitSettingsView({
 function GlobalApprovalPolicySettingsView({
   approvalPolicies,
   members,
+  units,
   onReload
 }: {
   approvalPolicies: ApprovalPolicy[];
   members: Member[];
+  units: Unit[];
   onReload: () => Promise<void>;
 }) {
   const [policyBusy, setPolicyBusy] = useState(false);
@@ -909,6 +1345,8 @@ function GlobalApprovalPolicySettingsView({
   const [policyDescription, setPolicyDescription] = useState("");
   const [policyEnabled, setPolicyEnabled] = useState(true);
   const [policyMode, setPolicyMode] = useState<ApprovalPolicy["mode"]>("PARALLEL");
+  const [policyUnitId, setPolicyUnitId] = useState<string>("");
+  const [scopeFilter, setScopeFilter] = useState<"ALL" | "GLOBAL" | "UNIT">("ALL");
   const [policyLines, setPolicyLines] = useState<Array<{ id: string; type: "CONSENSUS" | "APPROVAL"; participantIds: string[]; minApprovals: number }>>([
     { id: `line-${crypto.randomUUID()}`, type: "CONSENSUS", participantIds: [], minApprovals: 1 }
   ]);
@@ -919,6 +1357,7 @@ function GlobalApprovalPolicySettingsView({
     setPolicyDescription("");
     setPolicyEnabled(true);
     setPolicyMode("PARALLEL");
+    setPolicyUnitId("");
     setPolicyLines([{ id: `line-${crypto.randomUUID()}`, type: "CONSENSUS", participantIds: [], minApprovals: 1 }]);
     setFinalApproverId("");
   };
@@ -930,6 +1369,7 @@ function GlobalApprovalPolicySettingsView({
     setPolicyDescription(policy.description ?? "");
     setPolicyEnabled(policy.enabled);
     setPolicyMode(policy.mode);
+    setPolicyUnitId(policy.unitId ?? "");
     setPolicyLines((policy.approvalLines ?? []).length
       ? (policy.approvalLines ?? []).map((line) => ({ id: line.id, type: line.type, participantIds: line.participantIds, minApprovals: line.minApprovals }))
       : [{ id: `line-${crypto.randomUUID()}`, type: "CONSENSUS", participantIds: [], minApprovals: 1 }]);
@@ -952,6 +1392,7 @@ function GlobalApprovalPolicySettingsView({
       const payload = {
         name: policyName.trim(),
         description: policyDescription.trim() || undefined,
+        unitId: policyUnitId || null,
         enabled: policyEnabled,
         mode: policyMode,
         approverType: "MEMBER",
@@ -967,10 +1408,10 @@ function GlobalApprovalPolicySettingsView({
       };
       if (editingPolicyId) {
         await request(`/api/admin/approval-policies/${editingPolicyId}`, { method: "PATCH", body: JSON.stringify(payload) });
-        setPolicyMessage("전역 승인정책이 수정되었습니다.");
+        setPolicyMessage("승인정책이 수정되었습니다.");
       } else {
         await request("/api/admin/approval-policies", { method: "POST", body: JSON.stringify(payload) });
-        setPolicyMessage("전역 승인정책이 생성되었습니다.");
+        setPolicyMessage("승인정책이 생성되었습니다.");
       }
       await onReload();
       resetPolicyForm();
@@ -980,6 +1421,12 @@ function GlobalApprovalPolicySettingsView({
       setPolicyBusy(false);
     }
   };
+  const visiblePolicies = approvalPolicies.filter((policy) => {
+    if (scopeFilter === "GLOBAL") return !policy.unitId;
+    if (scopeFilter === "UNIT") return Boolean(policy.unitId);
+    return true;
+  });
+  const unitNameById = new Map(units.map((unit) => [unit.id, unit.name]));
   return (
     <section className="page-stack">
       <PageHeader eyebrow="설정" title="전역 승인정책" />
@@ -990,9 +1437,19 @@ function GlobalApprovalPolicySettingsView({
             <small>정책 선택</small>
             <select value={editingPolicyId} onChange={(event) => (event.target.value ? loadPolicy(event.target.value) : resetPolicyForm())}>
               <option value="">새 정책 작성</option>
-              {approvalPolicies.map((policy) => (
-                <option key={policy.id} value={policy.id}>{policy.name}</option>
+              {visiblePolicies.map((policy) => (
+                <option key={policy.id} value={policy.id}>
+                  {policy.unitId ? `[유닛:${unitNameById.get(policy.unitId) ?? "미지정"}] ${policy.name}` : `[전역] ${policy.name}`}
+                </option>
               ))}
+            </select>
+          </label>
+          <label className="policy-toolbar-field">
+            <small>스코프 필터</small>
+            <select value={scopeFilter} onChange={(event) => setScopeFilter(event.target.value as "ALL" | "GLOBAL" | "UNIT")}>
+              <option value="ALL">전체</option>
+              <option value="GLOBAL">전역 정책</option>
+              <option value="UNIT">유닛 정책</option>
             </select>
           </label>
           <button type="button" className="button secondary" onClick={resetPolicyForm}>초기화</button>
@@ -1009,6 +1466,15 @@ function GlobalApprovalPolicySettingsView({
             <label>
               설명
               <input value={policyDescription} onChange={(event) => setPolicyDescription(event.target.value)} placeholder="정책 설명" />
+            </label>
+            <label>
+              정책 스코프
+              <select value={policyUnitId} onChange={(event) => setPolicyUnitId(event.target.value)}>
+                <option value="">전역</option>
+                {units.map((unit) => (
+                  <option key={unit.id} value={unit.id}>{unit.name}</option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="policy-meta-row">
@@ -1603,11 +2069,11 @@ function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: string; me
   if (!detail || !task) return <Centered><div className="loader" /></Centered>;
 
 	  const { parent, notes, attachments = [], referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
-  const canEditTask = permissions?.canEditTask ?? ["ADMIN", "EDITOR", "APPROVER"].includes(me.role);
-  const canEditForm = permissions?.canEditForm ?? ["ADMIN", "EDITOR", "APPROVER"].includes(me.role);
+  const canEditTask = permissions?.canEditTask ?? ["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
+  const canEditForm = permissions?.canEditForm ?? ["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
   const changed = hasChangedSinceSeen(task, parent, me.id);
-  const canApprove = ["APPROVER", "ADMIN"].includes(me.role);
-  const canDeleteTask = me.role === "ADMIN" || task.ownerId === me.id;
+  const canApprove = ["OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
+  const canDeleteTask = me.role === "ADMIN" || me.role === "SUPER_ADMIN" || task.ownerId === me.id;
 
   const deleteTask = async () => {
     if (!canDeleteTask || !window.confirm("이 태스크와 하위 태스크, 노트, 스레드, 타임라인을 삭제할까요?")) return;
@@ -3384,7 +3850,7 @@ function NotificationSettingsView() {
           </div>
           {pushError && <p className="form-error">{pushError}</p>}
           <label className="toggle-field"><input type="checkbox" checked={settings.emailEnabled} onChange={(event) => patch({ emailEnabled: event.target.checked })} />이메일 알림 받기</label>
-          <label className="toggle-field"><input type="checkbox" checked={settings.digestEnabled} onChange={(event) => patch({ digestEnabled: event.target.checked })} />일일 요약 받기</label>
+          <label className="toggle-field"><input type="checkbox" checked={settings.digestEnabled} onChange={(event) => patch({ digestEnabled: event.target.checked })} />하루 한 번 요약 알림 받기</label>
           <label className="toggle-field"><input type="checkbox" checked={settings.mentionOnlyForWatchers} onChange={(event) => patch({ mentionOnlyForWatchers: event.target.checked })} />내가 관여한 태스크 멘션만 우선 수신</label>
           <label className="meta-row">
             <strong>SLA 응답 시간(시간)</strong>
@@ -4657,15 +5123,14 @@ function TemplateCard({
   );
 }
 
-function MembersView({ members, onReload }: { members: Member[]; onReload: () => Promise<void> }) {
+function MembersView({ members, onReload, embedded = false }: { members: Member[]; onReload: () => Promise<void>; embedded?: boolean }) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<Role>("VIEWER");
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const invite = async (event: FormEvent) => {
     event.preventDefault();
-    const result = await request<{ inviteUrl: string }>("/api/admin/invitations", { method: "POST", body: JSON.stringify({ email, role }) });
+    const result = await request<{ inviteUrl: string }>("/api/admin/invitations", { method: "POST", body: JSON.stringify({ email, role: "MEMBER" }) });
     setInviteUrl(result.inviteUrl);
     setEmail("");
     await onReload();
@@ -4702,12 +5167,12 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
 
   return (
     <section className="page-stack">
-      <PageHeader eyebrow="관리" title="멤버와 역할" />
+      {!embedded && <PageHeader eyebrow="관리" title="멤버와 역할" />}
       <form className="create-card" onSubmit={invite}>
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="member@company.com" />
-        <Select label="역할" value={role} onChange={(v) => setRole(v as Role)} options={["VIEWER", "EDITOR", "APPROVER", "ADMIN"].map((v) => [v, roleLabel[v as Role]])} />
         <button className="button primary">초대</button>
       </form>
+      <p className="muted">전역 사용자 관리는 계정 생성/삭제 중심이며, 권한은 권한 정책/유닛 멤버십에서 부여합니다.</p>
       {inviteUrl && <div className="change-banner"><strong>초대 URL</strong><span>{inviteUrl}</span></div>}
       {error && <div className="inline-error">{error}</div>}
       <div className="task-table">
@@ -4716,13 +5181,8 @@ function MembersView({ members, onReload }: { members: Member[]; onReload: () =>
 	            <div className="avatar">{member.name.slice(0, 1)}</div>
 	            <strong>{member.name}</strong>
 	            <span>{member.email}</span>
+              <Badge tone="slate">사용자</Badge>
 	            <div className="row-actions">
-	              <Select
-                  tone="inline"
-	                value={member.role}
-	                onChange={(nextRole) => void changeRole(member.id, nextRole as Role)}
-		                options={["VIEWER", "EDITOR", "APPROVER", "ADMIN"].map((v) => [v, roleLabel[v as Role]])}
-		              />
 	              <button className="button danger" onClick={() => void removeMember(member)}>제거</button>
 	            </div>
 	          </div>
