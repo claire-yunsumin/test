@@ -1,8 +1,9 @@
-# SelvasIn4 HWE Action Flows
+# SelvasIn4 HWE 액션 플로우
 
-This document captures the PRD action-flow model as implementation-facing diagrams. The key product principle is that user actions must accumulate into a Decision Graph, not just produce isolated task outputs.
+이 문서는 PRD의 액션 플로우 모델을 "구현 관점"으로 정리한 다이어그램 문서입니다.  
+핵심 원칙은 단순히 태스크 결과를 쌓는 것이 아니라, 사용자 행동이 누적되어 `Decision Graph` 자산이 되도록 만드는 것입니다.
 
-## 1. HWE Hook Loop
+## 1. HWE Hook 루프
 
 ```mermaid
 flowchart LR
@@ -13,11 +14,11 @@ flowchart LR
   E --> A
 ```
 
-- Investment means structure, context, and methodology contributed by users.
-- The loop is healthy only when alerts feel like meaningful participation signals.
-- The accumulated asset is the Decision Graph.
+- Investment는 사용자가 남기는 구조, 맥락, 방법론 기여를 의미합니다.
+- 알림이 "의미 있는 참여 신호"로 느껴질 때 루프가 건강하게 유지됩니다.
+- 이 루프의 누적 결과물이 `Decision Graph`입니다.
 
-## 2. Decision Action Flow
+## 2. 의사결정 액션 플로우
 
 ```mermaid
 flowchart TD
@@ -35,13 +36,13 @@ flowchart TD
   J --> K[Inbox routing to stakeholders]
 ```
 
-Implementation constraints:
+구현 제약:
 
-- Server validates role and resource visibility.
-- `reason` is required for transitions.
-- `referencedNoteIds` can point to notes on any task visible to the acting user.
+- 서버가 역할/리소스 가시성을 강제 검증합니다.
+- 상태 전이 시 `reason`은 필수입니다.
+- `referencedNoteIds`는 "행위자에게 보이는 태스크"의 노트만 참조할 수 있습니다.
 
-## 3. Notes, Thread, And # Reference Flow
+## 3. 노트, 스레드, #참조 플로우
 
 ```mermaid
 flowchart LR
@@ -54,9 +55,10 @@ flowchart LR
   G --> H[User returns to context]
 ```
 
-This closes the Variable Reward loop: a user invests by referencing or editing context, and another user receives a meaningful update tied to a prior action.
+이 흐름은 Variable Reward 루프를 닫습니다.  
+한 사용자가 맥락을 참조/수정해 투자하면, 다른 사용자는 과거 행동과 연결된 의미 있는 업데이트를 받게 됩니다.
 
-## 4. Inbox Routing Flow
+## 4. Inbox 라우팅 플로우
 
 ```mermaid
 flowchart TD
@@ -68,13 +70,13 @@ flowchart TD
   C -- RESULT --> G[Completion / cancellation result]
 ```
 
-Implementation constraints:
+구현 제약:
 
-- Backend owns event-to-component routing.
-- Frontend tabs are views over server-classified inbox items.
-- Shared enums prevent drift between API and UI.
+- 이벤트를 Inbox 컴포넌트로 분류하는 책임은 백엔드에 있습니다.
+- 프론트의 탭은 서버가 분류한 Inbox 항목을 보여주는 뷰입니다.
+- 공용 enum을 사용해 API/UI 간 분류 불일치를 방지합니다.
 
-## 5. Two-Week Integrated Flow
+## 5. 2주 통합 플로우
 
 ```mermaid
 sequenceDiagram
@@ -96,9 +98,9 @@ sequenceDiagram
   PM->>S: 다음 Task 생성
 ```
 
-The pilot should watch where the transition from trigger to voluntary action fails.
+파일럿에서는 "트리거 발생 -> 자발 행동 전환" 구간이 어디서 끊기는지를 집중 관찰해야 합니다.
 
-## 6. Decision Graph Layers
+## 6. Decision Graph 레이어
 
 ```mermaid
 flowchart TD
@@ -108,11 +110,11 @@ flowchart TD
   D -. lock-in .-> A
 ```
 
-Decision Graph is composed of:
+Decision Graph는 아래 레이어로 구성됩니다.
 
-- Nodes: Objective, KR, Task, and other template-typed units.
-- Context: Notes and Thread attached to each node.
-- Decisions: Timeline events with decision type, reason, and note references.
-- Relations: `parentId`, `referencedNoteIds`, watchers, assignees, and approvers.
+- 노드: Objective, KR, Task 및 템플릿 타입 단위
+- 컨텍스트: 각 노드에 붙는 Notes와 Thread
+- 결정: decision type, reason, note reference를 포함한 Timeline 이벤트
+- 관계: `parentId`, `referencedNoteIds`, watchers, assignees, approvers
 
-The UI route `/graph` visualizes the first four layers from current API data.
+현재 UI의 `/graph` 라우트는 API 데이터 기반으로 위 4개 레이어를 시각화합니다.
