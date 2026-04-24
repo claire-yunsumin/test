@@ -30,10 +30,12 @@ flowchart TD
   F -- APPROVE --> G[DONE]
   F -- REJECT --> H[CANCELED]
   F -- SUPPLEMENT --> I[IN_PROGRESS]
-  G --> J[Timeline: decision_type / reason / referencedNotes]
-  H --> J
-  I --> J
-  J --> K[Inbox routing to stakeholders]
+  G --> J[Timeline event: COMPLETED + decisionType/reason/referencedNotes]
+  H --> K[Timeline event: STATE_TRANSITION + decisionType=REJECT]
+  I --> L[Timeline event: STATE_TRANSITION + decisionType=SUPPLEMENT]
+  J --> M[Inbox routing to stakeholders]
+  K --> M
+  L --> M
 ```
 
 구현 제약:
@@ -41,6 +43,7 @@ flowchart TD
 - 서버가 역할/리소스 가시성을 강제 검증합니다.
 - 상태 전이 시 `reason`은 필수입니다.
 - `referencedNoteIds`는 "행위자에게 보이는 태스크"의 노트만 참조할 수 있습니다.
+- 구현 기준 이벤트명은 `APPROVAL_REQUESTED`, `COMPLETED`, `STATE_TRANSITION`이며, 결정 의미는 `decisionType`으로 구분합니다.
 
 ## 3. 노트, 스레드, #참조 플로우
 
@@ -92,9 +95,9 @@ sequenceDiagram
   S->>PM: NOTE_UPDATED trigger
   PM->>S: 수정 맥락 확인
   M->>S: Request Review
-  S->>L: DECISION trigger
+  S->>L: APPROVAL_REQUESTED trigger
   L->>S: Approve / Supplement / Reject + reason
-  S->>PM: RESULT / DISCUSSION trigger
+  S->>PM: COMPLETED 또는 STATE_TRANSITION trigger
   PM->>S: 다음 Task 생성
 ```
 
