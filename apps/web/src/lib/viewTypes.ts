@@ -1,4 +1,17 @@
-import type { Member, Note, Task, TaskAttachment, Template, ThreadComment, TimelineEvent } from "@hwe/shared";
+import type {
+  ApprovalRequestSummary,
+  Member,
+  Note,
+  Task,
+  TaskAction,
+  TaskAttachment,
+  TaskPermissions,
+  Template,
+  TemplateSnapshot,
+  ThreadComment,
+  TimelineEvent,
+  WorkflowRuntime
+} from "@hwe/shared";
 
 export type TaskView = Task & {
   template: Template | null;
@@ -10,6 +23,11 @@ export type TaskView = Task & {
 
 export type TaskDetail = {
   task: TaskView;
+  templateSnapshot: TemplateSnapshot | null;
+  workflowRuntime: WorkflowRuntime;
+  activeApprovalRequest?: ApprovalRequestSummary;
+  availableActions: TaskAction[];
+  permissions: TaskPermissions;
   parent: TaskView | null;
   children: TaskView[];
   referenceableTasks: TaskView[];
@@ -19,8 +37,4 @@ export type TaskDetail = {
   comments: ThreadComment[];
   timeline: TimelineEvent[];
   members: Member[];
-  permissions?: {
-    canEditTask: boolean;
-    canEditForm: boolean;
-  };
 };

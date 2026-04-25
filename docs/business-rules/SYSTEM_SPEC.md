@@ -124,11 +124,16 @@
 - 템플릿 전이 조건의 `approvalGate`가 활성화된 경우, 정책 선택은 `approvalGate.policyId`를 우선하고 없으면 task의 `approvalPolicyId`를 사용합니다.
 - 선택된 정책의 `mode`/`approvalLines`/`finalApproverId`에 따라 결재 유형과 결재 라인을 해석해야 합니다.
 - `mode=CONSENSUS`에서는 UI의 `APPROVE` 라벨을 `합의`로 표시하되, API 전송값은 `decisionType=APPROVE`를 유지합니다.
+- 승인 요청은 `ApprovalRequest`, 승인/반려/보완 판단은 `ApprovalDecision`으로 기록합니다.
+- 열린 승인 요청이 있는 task에는 추가 승인 요청을 만들 수 없으며 `APPROVAL_ALREADY_PENDING`을 반환합니다.
 - 전이 결과는 타임라인 이벤트와 Inbox 항목을 생성합니다.
 
 영향 영역:
 
-- `/api/tasks/:taskId/transition`
+- `/api/tasks/:taskId/transitions`
+- `/api/tasks/:taskId/approval-requests`
+- `/api/approval-requests/:approvalRequestId/decisions`
+- `/api/tasks/:taskId/transition` (legacy compatibility)
 - 우측 타임라인 탭
 - 승인/반려/보완 UX
 - `docs/APPROVAL_POLICY_SPEC.md`의 Inbox 승인 처리 플로우 및 정책 적용 순서

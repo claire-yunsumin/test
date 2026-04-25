@@ -47,9 +47,12 @@ Form Output은 임의 key/value가 아니라 적용된 Template의 `formDefiniti
 
 ## 4. 전이와 결정
 
-전이 API:
+전이/승인 API:
 
-- `POST /api/tasks/:taskId/transition`
+- `POST /api/tasks/:taskId/transitions`
+- `POST /api/tasks/:taskId/approval-requests`
+- `POST /api/approval-requests/:approvalRequestId/decisions`
+- `POST /api/tasks/:taskId/transition` (legacy compatibility)
 
 전이 규칙:
 
@@ -57,13 +60,14 @@ Form Output은 임의 key/value가 아니라 적용된 Template의 `formDefiniti
 - `workflowSchema`가 없거나 해당 전이가 없으면 legacy `workflow`를 사용합니다.
 - 전이 요청은 `reason`을 필요로 합니다.
 - `onExit.approvalGate`가 있으면 승인정책과 Inbox 수신자 계산에 연결됩니다.
+- 승인 요청은 `ApprovalRequest.policySnapshot`에 요청 시점 정책을 고정하고, 열린 요청이 있으면 중복 요청을 차단합니다.
 
 ## 5. 조회와 표현
 
 - `/api/bootstrap`: visible task와 함께 templates를 반환합니다.
 - `/api/templates`: Template 목록을 반환합니다.
 - 태스크 상세: Form Output과 검수 기준을 보여줍니다.
-- 결정 액션 바: 적용된 workflow 전이를 기반으로 가능한 액션을 보여줍니다.
+- 결정 액션 바: 상세 응답의 `workflowRuntime`/`availableActions`를 기반으로 가능한 액션을 보여줍니다.
 
 ## 흐름도
 

@@ -9,6 +9,7 @@ import {
   type AppData,
   type ApprovalLine,
   type ApprovalPolicy,
+  type ApprovalRequestSummary,
   type DecisionType,
   type FormFieldType,
   type InboxComponent,
@@ -18,6 +19,7 @@ import {
   type NotificationSettings,
   type Role,
   type Task,
+  type TaskAction,
   type TaskAttachment,
   type TaskState,
   type Template,
@@ -30,6 +32,7 @@ import {
 } from "@hwe/shared";
 import { Badge, Centered, FilterShell, Meta, MetaWithHint, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "../components/ui";
 import { request } from "../lib/api";
+import { attachmentSource, fileToDataUrl, formatAttachmentSize } from "../lib/attachments";
 import { go } from "../lib/router";
 import type { TaskDetail, TaskView } from "../lib/viewTypes";
 import { TaskViewTabs } from "../features/tasks/TaskViewTabs";
@@ -136,7 +139,21 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
 
   if (!detail || !task) return <Centered><div className="loader" /></Centered>;
 
-  const { parent, notes, attachments = [], referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
+  const {
+    parent,
+    notes,
+    attachments = [],
+    referenceableNotes = notes,
+    referenceableTasks = [task],
+    comments,
+    timeline,
+    members,
+    children,
+    permissions,
+    activeApprovalRequest,
+    workflowRuntime,
+    availableActions
+  } = detail;
   const fallbackCanEdit = me.role === "ADMIN" || me.role === "SUPER_ADMIN" || task.ownerId === me.id || task.assigneeIds.includes(me.id);
   const canEditTask = permissions?.canEditTask ?? fallbackCanEdit;
   const canEditForm = permissions?.canEditForm ?? fallbackCanEdit;
@@ -149,7 +166,7 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
   const latestDecisionEvent = timeline.find((event) =>
     ["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED"].includes(event.type)
   );
-  const pendingApproval = (task.workflowStatusId ?? "").includes("pending");
+  const pendingApproval = workflowRuntime.pendingApproval || Boolean(activeApprovalRequest);
   const decisionStageLabel = pendingApproval
     ? "승인 대기"
     : latestDecisionEvent?.type === "APPROVAL_APPROVED"
@@ -188,7 +205,25 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
     try {
       setBusy(true);
       setActionError(null);
-      await request(`/api/tasks/${task.id}/transition`, { method: "POST", body: JSON.stringify(payload) });
+      if (activeApprovalRequest && payload.decisionType !== "STATE_ONLY") {
+        const decisionValue = payload.decisionType === "SUPPLEMENT" ? "SUPPLEMENT_REQUEST" : payload.decisionType;
+        await request(`/api/approval-requests/${activeApprovalRequest.id}/decisions`, {
+          method: "POST",
+          body: JSON.stringify({ decision: decisionValue, reason: payload.reason, referencedNoteIds: payload.referencedNoteIds })
+        });
+      } else if (payload.decisionType === "STATE_ONLY") {
+        await request(`/api/tasks/${task.id}/transitions`, { method: "POST", body: JSON.stringify(payload) });
+      } else {
+        await request(`/api/tasks/${task.id}/approval-requests`, {
+          method: "POST",
+          body: JSON.stringify({
+            toState: payload.toState,
+            decisionType: payload.decisionType,
+            reason: payload.reason,
+            referencedNoteIds: payload.referencedNoteIds
+          })
+        });
+      }
       await Promise.all([load(), onReload()]);
       setDecision(null);
     } catch (err) {
@@ -303,6 +338,8 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               comments={comments}
               onOpenDecision={setDecision}
               approvalModeHint={typeof approvalPayload.approvalMode === "string" ? approvalPayload.approvalMode : null}
+              activeApprovalRequest={activeApprovalRequest ?? null}
+              availableActions={availableActions}
               onReload={load}
             />
           </div>
@@ -602,6 +639,8 @@ function SystemFieldsPanel({
   comments,
   onOpenDecision,
   approvalModeHint,
+  activeApprovalRequest,
+  availableActions,
   onReload
 }: {
   task: TaskView;
@@ -616,6 +655,8 @@ function SystemFieldsPanel({
   comments: ThreadComment[];
   onOpenDecision: (action: { toState: TaskState; decisionType: DecisionType; title: string }) => void;
   approvalModeHint: string | null;
+  activeApprovalRequest: ApprovalRequestSummary | null;
+  availableActions: TaskAction[];
   onReload: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -890,7 +931,16 @@ function SystemFieldsPanel({
     if (names.length === 1) return names[0];
     return `${names[0]} +${names.length - 1}`;
   }, [members, task.assigneeIds]);
-  const nextActions = decisionActions(decisionState, canApprove);
+  const nextActions = activeApprovalRequest
+    ? availableActions
+      .filter((action): action is Extract<TaskAction, { type: "DECIDE_APPROVAL" }> => action.type === "DECIDE_APPROVAL")
+      .map((action) => ({
+        toState: action.decision === "APPROVE" ? "DONE" as TaskState : action.decision === "REJECT" ? "CANCELED" as TaskState : "IN_PROGRESS" as TaskState,
+        decisionType: action.decision === "SUPPLEMENT_REQUEST" ? "SUPPLEMENT" as DecisionType : action.decision as DecisionType,
+        title: action.label,
+        tone: action.decision === "APPROVE" ? "green" : action.decision === "REJECT" ? "red" : "amber"
+      }))
+    : decisionActions(decisionState, canApprove);
   const decisionTitle = (action: { decisionType: DecisionType; title: string }) =>
     action.decisionType === "APPROVE" && approvalModeHint === "CONSENSUS" ? "합의" : action.title;
   const transitionGateTargets = useMemo(() => {
@@ -1845,14 +1895,6 @@ function renderMarkdownInline(text: string): ReactNode[] {
   return nodes.length ? nodes : [text];
 }
 
-function resolveAttachmentSource(raw: string, attachmentsById: Map<string, TaskAttachment>) {
-  if (!raw.startsWith("attachment://")) return raw;
-  const attachmentId = raw.slice("attachment://".length);
-  const attachment = attachmentsById.get(attachmentId);
-  if (!attachment) return "";
-  return attachment.kind === "FILE" ? attachment.contentDataUrl ?? "" : attachment.url ?? "";
-}
-
 function renderMarkdownBlock(value: string, attachmentsById: Map<string, TaskAttachment>) {
   const lines = value.split("\n");
   const blocks: ReactNode[] = [];
@@ -1943,7 +1985,7 @@ function renderMarkdownBlock(value: string, attachmentsById: Map<string, TaskAtt
       return;
     }
     if (image) {
-      const src = resolveAttachmentSource(image[2], attachmentsById);
+      const src = attachmentSource(image[2], attachmentsById);
       if (src) {
         blocks.push(
           <figure key={`md-image-${blockKey++}`} className="markdown-image">
@@ -2022,12 +2064,7 @@ function DescriptionRichEditor({
       setPasteError(null);
       const snippets: string[] = [];
       for (const file of files) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result ?? ""));
-          reader.onerror = () => reject(new Error("클립보드 이미지 읽기에 실패했습니다."));
-          reader.readAsDataURL(file);
-        });
+        const dataUrl = await fileToDataUrl(file);
         const attachment = await request<TaskAttachment>(`/api/tasks/${taskId}/attachments/file`, {
           method: "POST",
           body: JSON.stringify({
@@ -2463,12 +2500,7 @@ function AttachmentsSection({
       setBusy(true);
       setError(null);
       for (const file of Array.from(files)) {
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result ?? ""));
-          reader.onerror = () => reject(new Error("파일 읽기에 실패했습니다."));
-          reader.readAsDataURL(file);
-        });
+        const dataUrl = await fileToDataUrl(file);
         await request(`/api/tasks/${taskId}/attachments/file`, {
           method: "POST",
           body: JSON.stringify({
@@ -2546,7 +2578,7 @@ function AttachmentsSection({
         {attachments.map((attachment) => (
           <article key={attachment.id} className="attachment-card">
             <strong>{attachment.name}</strong>
-            <small>{attachment.kind === "FILE" ? (attachment.mimeType ?? "file") : "link"} {attachment.size ? `· ${Math.max(1, Math.round(attachment.size / 1024))}KB` : ""}</small>
+            <small>{attachment.kind === "FILE" ? (attachment.mimeType ?? "file") : "link"} {formatAttachmentSize(attachment.size) ? `· ${formatAttachmentSize(attachment.size)}` : ""}</small>
             <div className="row-actions left">
               {attachment.kind === "FILE" && attachment.contentDataUrl ? (
                 <>

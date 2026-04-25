@@ -6,6 +6,8 @@ export type WorkflowStatusCategory = "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL"
 export type Priority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type Role = "MEMBER" | "OWNER" | "ADMIN" | "SUPER_ADMIN";
 export type DecisionType = "APPROVE" | "REJECT" | "SUPPLEMENT" | "STATE_ONLY";
+export type ApprovalRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "SUPPLEMENT_REQUESTED";
+export type ApprovalDecisionValue = "APPROVE" | "REJECT" | "SUPPLEMENT_REQUEST";
 export type InboxComponent = "DECISION" | "DISCUSSION" | "AWARENESS" | "RESULT";
 export type StructureState = "FREEFORM" | "TEMPLATED";
 export type MentionType = "MEMBER" | "TASK" | "FORM_FIELD" | "NOTE";
@@ -26,11 +28,15 @@ export type EventType =
   | "TEMPLATE_APPLIED"
   | "TEMPLATE_REPLACED"
   | "TEMPLATE_REMOVED"
+  | "TEMPLATE_SNAPSHOT_APPLIED"
   | "STATE_TRANSITION"
+  | "TASK_TRANSITIONED"
   | "APPROVAL_REQUESTED"
   | "APPROVAL_APPROVED"
   | "APPROVAL_REJECTED"
+  | "APPROVAL_SUPPLEMENT_REQUESTED"
   | "NOTE_UPDATED"
+  | "NOTE_REFERENCED"
   | "COMMENT"
   | "MENTION"
   | "HIERARCHY_CHANGE"
@@ -97,6 +103,42 @@ export type TimelineEvent = {
   createdAt: string;
 };
 
+export type TemplateSnapshot = {
+  templateId: string | null;
+  name: string | null;
+  type: TemplateType | null;
+  version: number | null;
+  lifecycleStatus?: TemplateLifecycleStatus | null;
+  fingerprint?: string | null;
+  formDefinition: FormFieldDefinition[];
+  inspectionCriteria: string[];
+  capturedAt: string;
+};
+
+export type WorkflowSnapshot = {
+  statuses: WorkflowStatusDefinition[];
+  transitions: NonNullable<Template["workflowSchema"]>["transitions"];
+  capturedAt: string;
+};
+
+export type ApprovalPolicySnapshot = {
+  policyId: string;
+  name: string;
+  mode: ApprovalMode;
+  approverType: ApprovalAssigneeType;
+  approverRole?: Role;
+  approverIds?: string[];
+  minApprovals: number;
+  approvalLines?: ApprovalLine[];
+  finalApproverId?: string | null;
+  capturedAt: string;
+};
+
+export type FormSnapshot = {
+  fields: FormFieldDefinition[];
+  capturedAt: string;
+};
+
 export type Task = {
   id: string;
   unitId: string;
@@ -108,6 +150,10 @@ export type Task = {
   structureState: StructureState;
   templateType: TemplateType | null;
   templateId: string | null;
+  templateSnapshot: TemplateSnapshot | null;
+  workflowSnapshot: WorkflowSnapshot;
+  approvalPolicySnapshot?: ApprovalPolicySnapshot | null;
+  formSnapshot: FormSnapshot;
   currentState: TaskState;
   workflowPhase?: WorkflowPhase;
   phaseOverride?: WorkflowPhase | null;
@@ -126,6 +172,30 @@ export type Task = {
   formValues: Record<string, string>;
   tags: string[];
   attachmentIds?: string[];
+};
+
+export type ApprovalRequest = {
+  id: string;
+  taskId: string;
+  fromStatusId: string;
+  targetStatusId: string;
+  policySnapshot: ApprovalPolicySnapshot;
+  status: ApprovalRequestStatus;
+  requestedBy: string;
+  requestedAt: string;
+  reason: string;
+  referencedNoteIds: string[];
+  decidedAt?: string | null;
+};
+
+export type ApprovalDecision = {
+  id: string;
+  approvalRequestId: string;
+  approverId: string;
+  decision: ApprovalDecisionValue;
+  reason?: string;
+  referencedNoteIds: string[];
+  decidedAt: string;
 };
 
 export type TaskAttachment = {
@@ -324,6 +394,39 @@ export type Analytics = {
   dataStatus: "ok" | "fallback";
 };
 
+export type ApprovalRequestSummary = {
+  id: string;
+  taskId: string;
+  fromStatusId: string;
+  targetStatusId: string;
+  status: ApprovalRequestStatus;
+  requestedBy: string;
+  requestedAt: string;
+  reason: string;
+  referencedNoteIds: string[];
+  policySnapshot: ApprovalPolicySnapshot;
+};
+
+export type WorkflowRuntime = {
+  currentStatusId: string;
+  currentCategory: WorkflowStatusCategory | null;
+  statuses: WorkflowStatusDefinition[];
+  transitions: WorkflowSnapshot["transitions"];
+  pendingApproval: boolean;
+};
+
+export type TaskAction =
+  | { type: "TRANSITION"; toStatusId: string; toState: TaskState; decisionType: DecisionType; label: string; requiresApproval: boolean }
+  | { type: "REQUEST_APPROVAL"; toStatusId: string; toState: TaskState; decisionType: DecisionType; label: string }
+  | { type: "DECIDE_APPROVAL"; approvalRequestId: string; decision: ApprovalDecisionValue; label: string };
+
+export type TaskPermissions = {
+  canEditTask: boolean;
+  canEditForm: boolean;
+  canRequestApproval: boolean;
+  canDecideApproval: boolean;
+};
+
 export type AppData = {
   me: Member;
   members: Member[];
@@ -336,6 +439,8 @@ export type AppData = {
   notes: Note[];
   comments: ThreadComment[];
   timeline: TimelineEvent[];
+  approvalRequests: ApprovalRequest[];
+  approvalDecisions: ApprovalDecision[];
   inbox: InboxItem[];
   notificationSettings: NotificationSettings[];
   webPushSubscriptions: WebPushSubscription[];
@@ -403,11 +508,28 @@ const legacyStateToPhase = (state: TaskState): WorkflowPhase => {
   return "ACTIVE";
 };
 
-const makeTask = (task: Omit<Task, "tags"> & Partial<Pick<Task, "tags">>): Task => ({
+const makeTask = (
+  task: Omit<Task, "tags" | "templateSnapshot" | "workflowSnapshot" | "approvalPolicySnapshot" | "formSnapshot"> &
+    Partial<Pick<Task, "tags" | "templateSnapshot" | "workflowSnapshot" | "approvalPolicySnapshot" | "formSnapshot">>
+): Task => ({
   ...task,
   workflowStatusId: task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState],
   workflowPhase: task.workflowPhase ?? legacyStateToPhase(task.currentState),
   phaseOverride: task.phaseOverride ?? null,
+  templateSnapshot: task.templateSnapshot ?? null,
+  workflowSnapshot: task.workflowSnapshot ?? {
+    statuses: DEFAULT_WORKFLOW_STATUSES,
+    transitions: workflow(false).map((row) => ({
+      fromStatusId: LEGACY_STATE_TO_STATUS_ID[row.from],
+      toStatusId: LEGACY_STATE_TO_STATUS_ID[row.to],
+      label: row.label,
+      decisionType: row.decisionType,
+      isDecision: row.isDecision
+    })),
+    capturedAt: task.createdAt
+  },
+  approvalPolicySnapshot: task.approvalPolicySnapshot ?? null,
+  formSnapshot: task.formSnapshot ?? { fields: [], capturedAt: task.createdAt },
   policyReviewRequired: task.policyReviewRequired ?? false,
   policyReviewReason: task.policyReviewReason ?? null,
   tags: task.tags ?? [],
@@ -2029,6 +2151,9 @@ export function createSeedData(): AppData {
     }
   ];
 
+  const approvalRequests: ApprovalRequest[] = [];
+  const approvalDecisions: ApprovalDecision[] = [];
+
   const inbox: InboxItem[] = [
     {
       id: "inbox-1",
@@ -2198,6 +2323,8 @@ export function createSeedData(): AppData {
     notes,
     comments,
     timeline,
+    approvalRequests,
+    approvalDecisions,
     inbox,
     notificationSettings,
     webPushSubscriptions,

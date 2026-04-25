@@ -2,15 +2,26 @@ import {
   type AppData,
   createSeedData,
   type Analytics,
+  type ApprovalPolicy,
+  type ApprovalPolicySnapshot,
   type EngagementEvent,
   type EngagementEventType,
   type InboxComponent,
   type Task,
   type FormFieldDefinition,
-  type TimelineEvent
+  type Template,
+  type TemplateSnapshot,
+  type TimelineEvent,
+  type WorkflowSnapshot,
+  DEFAULT_WORKFLOW_STATUSES,
+  LEGACY_STATE_TO_STATUS_ID
 } from "@hwe/shared";
 
 const LEGACY_TASK_FILES_FIELD_KEY = "__task_files";
+
+export function byId<T extends { id: string }>(rows: T[], id: string) {
+  return rows.find((row) => row.id === id);
+}
 
 function stripLegacyFileFieldFromFormValues(values: Record<string, string>) {
   const next = { ...values };
@@ -23,10 +34,10 @@ function stripLegacyFileFieldsFromDefinition(fields: FormFieldDefinition[]) {
 }
 
 function normalizeLegacyFileFields(source: AppData): AppData {
-  source.tasks = source.tasks.map((task) => ({
+  source.tasks = source.tasks.map((task) => normalizeTaskRuntimeSnapshots({
     ...task,
     formValues: stripLegacyFileFieldFromFormValues(task.formValues)
-  }));
+  }, source));
   source.templates = source.templates.map((template) => ({
     ...template,
     lifecycleStatus: template.lifecycleStatus ?? "ACTIVE",
@@ -44,8 +55,81 @@ export function resetData() {
   data = normalizeLegacyFileFields(createSeedData());
 }
 
-export const byId = <T extends { id: string }>(rows: T[], id: string) => rows.find((row) => row.id === id);
 export const now = () => new Date().toISOString();
+
+function templateTransitions(template: Template | null): WorkflowSnapshot["transitions"] {
+  if (template?.workflowSchema?.transitions?.length) return template.workflowSchema.transitions;
+  return (template?.workflow ?? []).map((rule) => ({
+    fromStatusId: LEGACY_STATE_TO_STATUS_ID[rule.from],
+    toStatusId: LEGACY_STATE_TO_STATUS_ID[rule.to],
+    label: rule.label,
+    decisionType: rule.decisionType,
+    isDecision: rule.isDecision
+  }));
+}
+
+export function buildTemplateSnapshot(template: Template | null, capturedAt = now()): TemplateSnapshot | null {
+  if (!template) return null;
+  return {
+    templateId: template.id,
+    name: template.name,
+    type: template.type,
+    version: template.version,
+    lifecycleStatus: template.lifecycleStatus ?? "ACTIVE",
+    fingerprint: template.fingerprint ?? null,
+    formDefinition: template.formDefinition.map((field) => ({ ...field })),
+    inspectionCriteria: [...template.inspectionCriteria],
+    capturedAt
+  };
+}
+
+export function buildWorkflowSnapshot(template: Template | null, capturedAt = now()): WorkflowSnapshot {
+  return {
+    statuses: (template?.workflowSchema?.statuses ?? DEFAULT_WORKFLOW_STATUSES).map((status) => ({ ...status })),
+    transitions: templateTransitions(template).map((transition) => ({
+      ...transition,
+      onEnter: transition.onEnter ? { ...transition.onEnter } : undefined,
+      onExit: transition.onExit ? { ...transition.onExit } : undefined
+    })),
+    capturedAt
+  };
+}
+
+export function buildApprovalPolicySnapshot(policy: ApprovalPolicy | null | undefined, capturedAt = now()): ApprovalPolicySnapshot | null {
+  if (!policy) return null;
+  return {
+    policyId: policy.id,
+    name: policy.name,
+    mode: policy.mode,
+    approverType: policy.approverType,
+    approverRole: policy.approverRole,
+    approverIds: policy.approverIds ? [...policy.approverIds] : undefined,
+    minApprovals: policy.minApprovals,
+    approvalLines: policy.approvalLines?.map((line) => ({ ...line, participantIds: [...line.participantIds] })),
+    finalApproverId: policy.finalApproverId ?? null,
+    capturedAt
+  };
+}
+
+export function applyTaskSnapshots(task: Task, template: Template | null, policy: ApprovalPolicy | null | undefined, capturedAt = now()) {
+  task.templateSnapshot = buildTemplateSnapshot(template, capturedAt);
+  task.workflowSnapshot = buildWorkflowSnapshot(template, capturedAt);
+  task.approvalPolicySnapshot = buildApprovalPolicySnapshot(policy, capturedAt);
+  task.formSnapshot = {
+    fields: (template?.formDefinition ?? []).map((field) => ({ ...field })),
+    capturedAt
+  };
+}
+
+function normalizeTaskRuntimeSnapshots(task: Task, source: AppData) {
+  const template = task.templateId ? byId(source.templates, task.templateId) ?? null : null;
+  const policy = task.approvalPolicyId ? byId(source.approvalPolicies, task.approvalPolicyId) : null;
+  if (!task.workflowSnapshot) task.workflowSnapshot = buildWorkflowSnapshot(template, task.createdAt);
+  if (task.templateId && !task.templateSnapshot) task.templateSnapshot = buildTemplateSnapshot(template, task.createdAt);
+  if (!task.formSnapshot) task.formSnapshot = { fields: (template?.formDefinition ?? []).map((field) => ({ ...field })), capturedAt: task.createdAt };
+  if (task.approvalPolicyId && !task.approvalPolicySnapshot) task.approvalPolicySnapshot = buildApprovalPolicySnapshot(policy, task.createdAt);
+  return task;
+}
 
 export function taskActivity(taskId: string) {
   return {
@@ -94,10 +178,10 @@ export function addEngagement(event: Omit<EngagementEvent, "id" | "createdAt">) 
 }
 
 export function componentForEvent(type: string): InboxComponent {
-  if (["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED"].includes(type)) return "DECISION";
-  if (["COMMENT", "MENTION", "NOTE_UPDATED"].includes(type)) return "DISCUSSION";
+  if (["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED", "APPROVAL_SUPPLEMENT_REQUESTED"].includes(type)) return "DECISION";
+  if (["COMMENT", "MENTION", "NOTE_UPDATED", "NOTE_REFERENCED"].includes(type)) return "DISCUSSION";
   if (["COMPLETED", "CANCELED"].includes(type)) return "RESULT";
-  if (["TASK_CREATED", "STATE_TRANSITION", "HIERARCHY_CHANGE", "TEMPLATE_APPLIED", "TEMPLATE_REPLACED", "TEMPLATE_REMOVED"].includes(type)) return "AWARENESS";
+  if (["TASK_CREATED", "STATE_TRANSITION", "TASK_TRANSITIONED", "HIERARCHY_CHANGE", "TEMPLATE_APPLIED", "TEMPLATE_REPLACED", "TEMPLATE_REMOVED", "TEMPLATE_SNAPSHOT_APPLIED"].includes(type)) return "AWARENESS";
   return "AWARENESS";
 }
 
@@ -113,6 +197,7 @@ export function applyTemplate(task: Task, templateId: string) {
   task.templateType = template.type;
   task.structureState = "TEMPLATED";
   task.formValues = nextValues;
+  applyTaskSnapshots(task, template, task.approvalPolicyId ? byId(data.approvalPolicies, task.approvalPolicyId) : null);
   task.updatedAt = now();
   return template;
 }

@@ -10,7 +10,10 @@
 
 - `POST /api/tasks`: `TASK_CREATED`
 - `PATCH /api/tasks/:taskId`: `STATE_TRANSITION`, `HIERARCHY_CHANGE`, `TEMPLATE_APPLIED/REPLACED/REMOVED`
-- `POST /api/tasks/:taskId/transition`: `APPROVAL_REQUESTED`, `APPROVAL_APPROVED/REJECTED`, `COMPLETED`, `STATE_TRANSITION`
+- `POST /api/tasks/:taskId/transitions`: `TASK_TRANSITIONED`, `COMPLETED`, `CANCELED`
+- `POST /api/tasks/:taskId/approval-requests`: `APPROVAL_REQUESTED`
+- `POST /api/approval-requests/:approvalRequestId/decisions`: `APPROVAL_APPROVED`, `APPROVAL_REJECTED`, `APPROVAL_SUPPLEMENT_REQUESTED`
+- `POST /api/tasks/:taskId/transition`: legacy compatibility
 - `POST/PATCH/DELETE note`: `NOTE_UPDATED`
 
 현재 구현에서 comment 작성/수정/삭제는 Timeline event를 만들지 않습니다. 댓글과 멘션은 Inbox와 Engagement, Decision Graph 참조 신호에 반영됩니다.
@@ -29,6 +32,17 @@
 - `createdAt`
 
 저장은 `apps/api/src/domain/store.ts`의 `data.timeline`이며, `addTimeline()`이 최신 이벤트를 앞에 추가합니다.
+
+## Snapshot Reference 원칙
+
+타임라인은 감사 로그이므로 이벤트 발생 당시의 근거를 복원할 수 있어야 합니다. 운영 DB 전환 시 payload는 본문 전체 복사보다 `id + version` 참조를 우선합니다.
+
+- Note 근거: `noteId + noteVersionId`
+- Form Output 근거: `formOutputVersionId`
+- 승인 근거: `approvalRequestId + approvalDecisionId`
+- Template/Workflow 근거: `templateVersionId + workflowVersionId`
+
+Note 버전 모델이 아직 없을 때는 차선책으로 `noteId + noteContentSnapshot`을 남깁니다. 화면은 snapshot을 보여주고, 클릭은 현재 Note로 이동하게 합니다.
 
 ## 표현 위치
 

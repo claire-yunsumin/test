@@ -47,9 +47,13 @@ flowchart LR
 flowchart TD
   A[상세 결정 액션 클릭] --> B[DecisionModal]
   B --> C[reason + referencedNoteIds 입력]
-  C --> D[POST /api/tasks/:taskId/transition]
-  D --> E[workflowSchema 또는 legacy workflow 검증]
+  C --> D{승인 필요?}
+  D -->|아니오| E[POST /api/tasks/:taskId/transitions]
+  D -->|요청 생성| R[POST /api/tasks/:taskId/approval-requests]
+  D -->|열린 요청 판단| Q[POST /api/approval-requests/:approvalRequestId/decisions]
   E --> F[Task state/status/phase 갱신]
+  R --> F
+  Q --> F
   F --> G[Timeline]
   F --> H[Inbox]
   F --> I[Engagement]

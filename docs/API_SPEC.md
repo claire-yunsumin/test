@@ -47,9 +47,24 @@ List는 `unitId`, `folderId`, `defaultPhase`를 가질 수 있습니다.
 - `GET /api/tasks/:taskId`
 - `PATCH /api/tasks/:taskId`
 - `DELETE /api/tasks/:taskId`
-- `POST /api/tasks/:taskId/transition`
+- `POST /api/tasks/:taskId/transitions`
+- `POST /api/tasks/:taskId/approval-requests`
+- `POST /api/approval-requests/:approvalRequestId/decisions`
+- `POST /api/tasks/:taskId/transition` (legacy compatibility)
 
-`GET /api/tasks/:taskId`는 현재 사용자에게 보이는 상세 데이터만 반환합니다. `children`, `referenceableTasks`, `referenceableNotes`도 visible task 범위로 필터링됩니다.
+`GET /api/tasks/:taskId`는 현재 사용자에게 보이는 상세 데이터만 반환합니다. `children`, `referenceableTasks`, `referenceableNotes`도 visible task 범위로 필터링됩니다. 상세 응답은 프론트가 상태 문자열을 추측하지 않도록 실행 런타임과 권한/액션을 함께 내려줍니다.
+
+```ts
+type TaskDetailDto = {
+  task: Task;
+  templateSnapshot: TemplateSnapshot | null;
+  workflowRuntime: WorkflowRuntime;
+  activeApprovalRequest?: ApprovalRequestSummary;
+  availableActions: TaskAction[];
+  permissions: TaskPermissions;
+  timeline: TimelineEvent[];
+};
+```
 
 `PATCH /api/tasks/:taskId` 권한:
 
@@ -98,18 +113,42 @@ List는 `unitId`, `folderId`, `defaultPhase`를 가질 수 있습니다.
 }
 ```
 
-전이 body:
+일반 전이 body (`POST /api/tasks/:taskId/transitions`):
+
+```json
+{
+  "toState": "IN_PROGRESS",
+  "toStatusId": "in_progress",
+  "decisionType": "STATE_ONLY",
+  "reason": "승인 근거",
+  "referencedNoteIds": ["note-1"]
+}
+```
+
+승인 요청 body (`POST /api/tasks/:taskId/approval-requests`):
 
 ```json
 {
   "toState": "DONE",
-  "toStatusId": "done",
+  "targetStatusId": "done",
   "decisionType": "APPROVE",
-  "reason": "승인 근거",
+  "reason": "승인 요청 근거",
   "referencedNoteIds": ["note-1"],
   "approvalPolicyId": "ap-growth-consensus"
 }
 ```
+
+승인 판단 body (`POST /api/approval-requests/:approvalRequestId/decisions`):
+
+```json
+{
+  "decision": "APPROVE",
+  "reason": "승인 판단 근거",
+  "referencedNoteIds": ["note-1"]
+}
+```
+
+열린 `ApprovalRequest`가 있는 task에 다시 승인 요청을 만들면 `409 APPROVAL_ALREADY_PENDING`을 반환합니다. legacy `/transition`은 기존 클라이언트 호환을 위해 유지하지만, 신규 UI와 문서는 위 3개 책임 분리 API를 기준으로 합니다.
 
 ## Attachment
 

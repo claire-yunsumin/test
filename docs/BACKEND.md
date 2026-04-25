@@ -48,10 +48,11 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 
 - Workspace: `Unit`, `Folder`, `TaskList`
 - Work Graph: `Task.parentId`, `structureState`, `templateId`
+- Task runtime snapshots: `templateSnapshot`, `workflowSnapshot`, `formSnapshot`, `approvalPolicySnapshot`
 - 실행 분류: `workflowPhase`, `phaseOverride`, `workflowStatusId`
 - 협업: `Note`(title/content/tags), `ThreadComment`, `Mention`
 - 기록: `TimelineEvent`, `InboxItem`, `EngagementEvent`
-- 정책: `Template`, `ApprovalPolicy`, `NotificationSettings`, `WebPushSubscription`
+- 정책: `Template`, `ApprovalPolicy`, `ApprovalRequest`, `ApprovalDecision`, `NotificationSettings`, `WebPushSubscription`
 
 ## 이벤트 처리
 
@@ -61,6 +62,8 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - `calculateAnalytics`: 현재 이벤트와 콘텐츠 상태를 기준으로 리텐션/협업 지표를 계산합니다.
 - 템플릿 교체 시 상태는 `mapWorkflowStatusForTemplate()`(카테고리 -> default -> legacy fallback)로 매핑하며, 최종 실패 시 `WORKFLOW_STATUS_MAPPING_REQUIRED`를 반환합니다.
 - 템플릿 교체 후 승인정책은 `validatePolicyAfterTemplateChange()`로 재검증하고 `policyReviewRequired`/`policyReviewReason`에 반영합니다.
+- 승인 요청은 `ApprovalRequest`로 분리하며, 열린 요청이 있으면 `APPROVAL_ALREADY_PENDING`(409)으로 중복 생성을 차단합니다.
+- `GET /api/tasks/:taskId`는 `workflowRuntime`, `activeApprovalRequest`, `availableActions`, `permissions`를 내려 프론트가 상태 문자열을 추측하지 않도록 합니다.
 
 ## 테스트 전략
 
@@ -75,6 +78,7 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - 노트 참조와 멘션 검증
 - FREEFORM 노드 생성과 parent 연결
 - Template 적용과 Form field 보강(기존값 보존 + 누락분 채움)
+- Task snapshot 고정, ApprovalRequest/ApprovalDecision 분리, 중복 승인요청 409 차단
 - 레거시 FILE/`__task_files` 필드 제거 및 저장 시 재유입 방지
 - 노트 생성/수정에서 태그(`tags`) 저장과 조회 반영
 - retention analytics 계산
@@ -85,4 +89,12 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - `server.ts` 라우트 분리
 - 인메모리 store를 DB repository로 교체
 - `X-Demo-User-Id`를 실제 인증으로 교체
-- workflowSchema 기반 전이와 ApprovalPolicy의 단계별 승인 상태 저장 확장
+- ApprovalPolicy의 다중 승인 정족수 누적/부분 승인 close 조건 고도화
+
+## 운영 DB 전환 메모
+
+현재 구현은 인메모리 데모 검증을 위해 Task에 embedded snapshot을 보관합니다. 운영 DB, 특히 Spring Boot + MyBatis 전환 시에는 Task row에 큰 JSON을 반복 저장하기보다 immutable version table을 두고 `templateVersionId`, `workflowVersionId`, `formSchemaVersionId`, `approvalPolicyVersionId`를 참조하는 VersionRef 방식을 권장합니다.
+
+승인 요청 중복 방어는 application check만으로 충분하지 않습니다. 운영 DB에서는 `task_id where status = 'PENDING'` unique partial index 또는 task row `SELECT ... FOR UPDATE`를 함께 적용해야 합니다.
+
+승인 결정 처리(`ApprovalDecision` 생성, `ApprovalRequest` close, `Task` status 전이, Timeline 기록, Inbox/outbox 기록)는 하나의 transaction boundary 안에 있어야 합니다. 외부 알림 발송은 transactional outbox에 적재한 뒤 commit 이후 worker가 처리합니다.

@@ -584,6 +584,52 @@ describe("input validation", () => {
     assert.equal(transitioned.body.event.payload.transitionApprovalEnabled, true);
     assert.equal(transitioned.body.event.payload.approvalPolicyId, "ap-default-unit-approver");
   });
+
+  test("separates approval requests and rejects duplicate pending requests", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "approval split task", templateId: "tpl-marketing-objective", currentState: "IN_PROGRESS" })
+    });
+    assert.equal(created.response.status, 201);
+    assert.ok(created.body.templateSnapshot);
+    assert.ok(created.body.workflowSnapshot);
+    assert.ok(created.body.approvalPolicySnapshot);
+
+    const request = await api(`/api/tasks/${created.body.id}/approval-requests`, {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "DONE",
+        decisionType: "APPROVE",
+        reason: "separate approval request",
+        approvalPolicyId: "ap-default-unit-approver"
+      })
+    });
+    assert.equal(request.response.status, 201);
+    assert.equal(request.body.approvalRequest.status, "PENDING");
+    assert.equal(request.body.event.type, "APPROVAL_REQUESTED");
+
+    const duplicate = await api(`/api/tasks/${created.body.id}/approval-requests`, {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({
+        toState: "DONE",
+        decisionType: "APPROVE",
+        reason: "duplicate request",
+        approvalPolicyId: "ap-default-unit-approver"
+      })
+    });
+    assert.equal(duplicate.response.status, 409);
+    assert.equal(duplicate.body.error, "APPROVAL_ALREADY_PENDING");
+
+    const detail = await api(`/api/tasks/${created.body.id}`, { userId: "u-admin" });
+    assert.equal(detail.response.status, 200);
+    assert.equal(detail.body.activeApprovalRequest.id, request.body.approvalRequest.id);
+    assert.equal(detail.body.workflowRuntime.pendingApproval, true);
+    assert.ok(Array.isArray(detail.body.availableActions));
+    assert.equal(detail.body.permissions.canDecideApproval, true);
+  });
 });
 
 describe("KR1.1 transition policy (KR11-TP-v1)", () => {

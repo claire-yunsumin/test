@@ -77,7 +77,7 @@
 
 - 정책 기준: `KR1_1_TRANSITION_POLICY_DECISION.md` (KR11-TP-v1)
 - 검증: `apps/api/src/security.test.ts`의 KR11-IT-01~05 시나리오 통과
-- 테스트 결과: `npm run test -w apps/api` (35 passed / 0 failed)
+- 테스트 결과: `npm run test -w apps/api` (36 passed / 0 failed)
 
 ## 시니어 리뷰 첨언 (Backend / Frontend)
 

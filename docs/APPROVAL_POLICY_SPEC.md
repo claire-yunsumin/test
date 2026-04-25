@@ -2,7 +2,7 @@
 
 ## 목적
 
-승인 요청이나 결정 전이 시 어떤 승인자/합의자/최종결정권자를 사용할지 정의합니다. 현재 구현은 정책 저장, 유효성 검증, 전이 시 Inbox 수신자 계산까지 포함합니다.
+승인 요청이나 결정 전이 시 어떤 승인자/합의자/최종결정권자를 사용할지 정의합니다. 현재 구현은 정책 저장, 유효성 검증, ApprovalRequest/ApprovalDecision 기록, Inbox 수신자 계산까지 포함합니다.
 
 ## ApprovalPolicy
 
@@ -28,25 +28,57 @@
 - `participantIds`
 - `minApprovals`
 
+## ApprovalRequest / ApprovalDecision
+
+`PENDING_APPROVAL`은 workflow status 문자열 포함 여부로 추측하지 않고, 열린 `ApprovalRequest(status=PENDING)` 존재 여부로 판단합니다.
+
+`ApprovalRequest`:
+
+- `id`
+- `taskId`
+- `fromStatusId`
+- `targetStatusId`
+- `policySnapshot`
+- `status`: `PENDING | APPROVED | REJECTED | SUPPLEMENT_REQUESTED`
+- `requestedBy`
+- `requestedAt`
+- `reason`
+- `referencedNoteIds`
+
+`ApprovalDecision`:
+
+- `id`
+- `approvalRequestId`
+- `approverId`
+- `decision`: `APPROVE | REJECT | SUPPLEMENT_REQUEST`
+- `reason`
+- `referencedNoteIds`
+- `decidedAt`
+
+하나의 task에 열린 ApprovalRequest가 있으면 새 승인 요청은 `409 APPROVAL_ALREADY_PENDING`으로 거절합니다.
+
 ## API
 
 - `GET /api/admin/approval-policies`
 - `POST /api/admin/approval-policies`
 - `PATCH /api/admin/approval-policies/:policyId`
+- `POST /api/tasks/:taskId/approval-requests`
+- `POST /api/approval-requests/:approvalRequestId/decisions`
 
 정책 생성/수정은 `ADMIN` 이상 권한이 필요합니다.
 
 ## 전이 연동
 
-`POST /api/tasks/:taskId/transition`은 `approvalPolicyId`를 받을 수 있습니다.
+신규 승인 플로우는 `POST /api/tasks/:taskId/approval-requests`와 `POST /api/approval-requests/:approvalRequestId/decisions`로 분리됩니다. Legacy `/api/tasks/:taskId/transition`은 기존 클라이언트 호환을 위해 유지됩니다.
 
 동작:
 
 1. 정책이 enabled인지 확인합니다.
 2. 요청자 또는 전이 승인자가 해당 policy의 승인자 집합에 포함되는지 확인합니다.
-3. task의 `approvalPolicyId`를 갱신합니다.
-4. 전이 payload에 policy 정보를 남깁니다.
-5. 승인 요청 성격의 전이에서는 policy 기반 수신자에게 Inbox를 생성합니다.
+3. task의 `approvalPolicyId`와 `approvalPolicySnapshot`을 갱신합니다.
+4. `ApprovalRequest.policySnapshot`에 요청 시점 정책을 고정합니다.
+5. Timeline payload에 request/decision id와 snapshot 참조를 남깁니다.
+6. 승인 요청 성격의 전이에서는 policy 기반 수신자에게 Inbox를 생성합니다.
 
 현재 전이 API는 policy의 `unitId`와 task의 `unitId` 일치 여부를 별도로 검증하지 않습니다. Unit 기본 승인정책 설정 시에는 policy scope를 검증합니다.
 
@@ -59,8 +91,8 @@
 
 ## 현재 한계
 
-- `minApprovals`는 수신자 계산과 정책 표현에 반영되지만, 다중 승인 완료 상태를 누적 저장하는 별도 approval run 모델은 아직 없습니다.
-- 향후 `ApprovalRun`, `ApprovalDecision` 테이블/스토어가 필요합니다.
+- `ApprovalDecision`은 저장되지만, `minApprovals`를 만족할 때까지 부분 승인 수를 누적한 뒤 자동 close하는 multi-step approval run은 아직 단순화되어 있습니다.
+- 현재 `APPROVE` 결정은 요청을 즉시 승인 완료 처리합니다. 다중 승인 누적/정족수 완료는 차기 approval engine 고도화 대상입니다.
 
 ## Inbox 승인 처리 플로우
 
@@ -73,7 +105,7 @@
    - `mode=CONSENSUS`인 경우 `APPROVE` 액션 라벨은 `승인`이 아니라 `합의`로 표시합니다.
    - 그 외 모드(`SINGLE`, `PARALLEL`)는 기존처럼 `승인` 라벨을 사용합니다.
 3. 사용자는 `합의/승인/보완 요청/반려` 중 가능한 액션을 고르고 리뷰 코멘트를 입력합니다.
-4. 전송 시 `POST /api/tasks/:taskId/transition`이 호출되며, 코멘트(`reason`)가 결정 근거로 저장됩니다.
+4. 전송 시 열린 요청은 `POST /api/approval-requests/:approvalRequestId/decisions`로 처리되며, 코멘트(`reason`)가 결정 근거로 저장됩니다.
 5. 처리된 항목은 읽음/처리완료 상태로 반영됩니다.
 
 ### 라벨/의미 매핑 원칙
@@ -94,7 +126,7 @@
 
 ### 서버 기록 원칙
 
-- 결정 결과는 타임라인 이벤트(`APPROVAL_APPROVED` / `APPROVAL_REJECTED` / `APPROVAL_REQUESTED`)로 남깁니다.
+- 결정 결과는 타임라인 이벤트(`APPROVAL_REQUESTED` / `APPROVAL_APPROVED` / `APPROVAL_REJECTED` / `APPROVAL_SUPPLEMENT_REQUESTED`)로 남깁니다.
 - Inbox 이벤트는 `sourceUserId`(결정 수행자)와 `userId`(수신자)를 함께 기록해 수신/발신함 양방향 조회를 가능하게 합니다.
 
 ## 템플릿 조건 기반 승인정책 적용 순서
@@ -116,6 +148,6 @@
    - `CONSENSUS` 정책인 경우 UI의 `APPROVE` 라벨은 `합의`로 표기됩니다.
 
 4. **실행/기록 반영**
-   - 사용자 액션(합의/승인/보완요청/반려)은 전이 API(`POST /api/tasks/:taskId/transition`)로 처리됩니다.
+   - 승인 요청은 `POST /api/tasks/:taskId/approval-requests`, 사용자 판단(합의/승인/보완요청/반려)은 `POST /api/approval-requests/:approvalRequestId/decisions`로 처리됩니다.
    - UI 라벨이 `합의`여도 API 전송값은 호환성을 위해 `decisionType=APPROVE`를 유지합니다.
    - 결과는 타임라인 이벤트와 Inbox 수신/발신함에 함께 기록되어 추적됩니다.

@@ -79,5 +79,5 @@
 | 지표 운영 연동 | 완료 | `templateStatusMappingSuccessRate`, `templateManualAdjustmentRate` 계산/노출 (`apps/api/src/domain/store.ts`, `AnalyticsPage.tsx`) |
 
 검증 메모:
-- API 테스트: `npm run test -w apps/api` 통과 (35 passed / 0 failed)
+- API 테스트: `npm run test -w apps/api` 통과 (36 passed / 0 failed)
 - 워크플로우 상태 처리 수용 기준: `KR11-WF-01 ~ KR11-WF-04` 모두 Pass (`KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md` 동기화)

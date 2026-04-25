@@ -23,6 +23,8 @@ apps/web/src/
   lib/router.ts                  currentRoute(), go()
   lib/viewTypes.ts               TaskDetail / TaskView 등 직렬화 뷰 타입
   lib/domain.ts                  라벨·표시용 헬퍼
+  lib/attachments.ts             첨부 source/파일 Data URL/크기 포맷 유틸
+  lib/hooks.ts                   useLocalStorage, usePopover
   styles.css                     전역·셸·익스플로러·화면 스타일
 ```
 
@@ -59,6 +61,8 @@ apps/web/src/
 
 상세 화면은 `GET /api/tasks/:taskId` 응답으로 렌더링합니다.
 
+- 서버 응답의 `workflowRuntime.pendingApproval`, `activeApprovalRequest`, `availableActions`, `permissions`를 기준으로 표시/액션을 결정합니다.
+- 프론트는 더 이상 `workflowStatusId.includes("pending")` 같은 문자열 추측으로 승인 대기 상태를 판단하지 않습니다.
 - 좌측: 시스템 필드, 소유자, 우선순위, 기한, 담당자/참관자, 하위 항목/노트/스레드/파일 수
 - 중앙: 노트, Form Output, 검수 기준
 - 우측: `TaskRightPanel` (`TaskDetailPage.tsx`)
@@ -105,6 +109,7 @@ apps/web/src/
 - 상세 진입은 `/api/tasks/:taskId`입니다.
 - 변경 액션 후 `onReload`로 서버 상태를 다시 가져옵니다.
 - `request()`는 `Content-Type`과 `X-Demo-User-Id`를 기본으로 보내고, 오류를 사용자 메시지로 변환합니다.
+- 상태 변경은 `POST /api/tasks/:taskId/transitions`, 승인 요청은 `POST /api/tasks/:taskId/approval-requests`, 승인 판단은 `POST /api/approval-requests/:approvalRequestId/decisions`를 사용합니다.
 
 ## 프론트 권한 원칙
 

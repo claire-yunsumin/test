@@ -77,7 +77,7 @@
 | KR11-DONE-05 | 문서/리포트 갱신 | 완료 | KR1.1 하위 문서 + OKR 매칭 리포트 동기화 | `docs/kr1-1/*`, `docs/README.md`, `docs/OKR_MATCHING_REPORT.md` 갱신 |
 
 검증 메모:
-- API 테스트: `npm run test -w apps/api` 통과 (35 passed / 0 failed)
+- API 테스트: `npm run test -w apps/api` 통과 (36 passed / 0 failed)
 
 ## 후속 실행백로그 (AI Ready / Scale)
 
@@ -88,3 +88,73 @@
 | P2 | 템플릿 수명주기 상태모델 도입 | 완료 | `packages/shared/src/index.ts`, `apps/api/src/server.ts`, `apps/web/src/pages/settings/SettingsPages.tsx` | `Draft/Active/Deprecated/Archived` 필드 추가, 템플릿 센터 필터/편집 반영, 셀렉터에서 Deprecated/Archived 기본 제외 |
 | P3 | 템플릿 중복 감지(fingerprint) | 완료 | `apps/api/src/server.ts`, `apps/api/src/domain/store.ts`, `apps/web/src/pages/settings/SettingsPages.tsx` | fingerprint 생성, 생성/수정 시 유사 후보 반환, 템플릿 센터 유사 배지 노출 |
 | P4 | AI 추천 1단계(추천-only) | 대기 | `apps/api/src/server.ts`, `apps/web/src/pages/TaskDetailPage.tsx`, `apps/web/src/pages/settings/SettingsPages.tsx` | Top-1+대안 추천, 이유 설명, 수락/거절 로그 수집 |
+
+## 운영 전환 보강 원칙
+
+현재 Express/인메모리 구현은 KR1.1 도메인 규칙을 빠르게 검증하기 위해 Task에 snapshot JSON을 직접 보관합니다. Spring Boot + MyBatis + RDB 운영 전환 시에는 아래 원칙을 우선합니다.
+
+### 1. Snapshot 저장 방식
+
+운영 DB에서는 큰 JSON snapshot을 Task row에 반복 저장하기보다 immutable version row를 참조합니다.
+
+```ts
+type Task = {
+  templateVersionId: string;
+  workflowVersionId: string;
+  approvalPolicyVersionId?: string;
+  formSchemaVersionId: string;
+};
+
+type TemplateVersion = {
+  id: string;
+  templateId: string;
+  version: number;
+  schema: TemplateSchema;
+  publishedAt: string;
+};
+```
+
+권장 이유:
+
+- 같은 템플릿을 쓰는 다수 Task에서 schema JSON 중복 저장을 줄입니다.
+- `template v3를 쓰는 Task 수` 같은 운영/분석 쿼리가 쉬워집니다.
+- MyBatis ResultMap이 과도하게 커지는 것을 피합니다.
+
+### 2. 중복 승인 요청 동시성 방어
+
+Application check는 유지하되 DB constraint를 최종 방어선으로 둡니다.
+
+- PostgreSQL: `UNIQUE INDEX (task_id) WHERE status = 'PENDING'`
+- 또는 `SELECT ... FOR UPDATE`로 task row를 잠근 뒤 check-and-create
+- 클라이언트는 `409 APPROVAL_ALREADY_PENDING`을 정상 충돌 응답으로 처리
+
+### 3. 승인 결정 원자성
+
+`POST /approval-requests/:id/decisions`에서 승인 완료 처리 시 아래 변경은 하나의 트랜잭션으로 묶습니다.
+
+1. `ApprovalDecision` 생성
+2. `ApprovalRequest.status` 갱신
+3. `Task.statusId`를 `targetStatusId`로 갱신
+4. Timeline event 추가
+5. Inbox/알림용 outbox record 추가
+
+외부 알림 발송은 트랜잭션 안에서 직접 수행하지 않고 transactional outbox 패턴을 사용합니다. 도메인 상태 commit 이후 별도 worker가 outbox를 처리해야 알림 실패와 도메인 불일치를 분리할 수 있습니다.
+
+### 4. Timeline Snapshot Reference
+
+Timeline에는 본문 전체를 무조건 복사하지 않고 `id + version` 참조를 우선합니다.
+
+- 권장: `noteId + noteVersionId`, `formOutputVersionId`, `approvalRequestId`, `approvalDecisionId`
+- Note 버전 모델이 없을 때의 차선책: `noteId + noteContentSnapshot`
+- 화면은 당시 snapshot을 보여주고, 링크는 현재 Note로 이동하게 합니다.
+
+### 5. P0 내부 작업 순서
+
+각 P0 작업은 아래 순서로 작게 나눠 main에 머지 가능한 단위로 진행합니다.
+
+1. DB schema/migration
+2. domain service
+3. API controller
+4. DTO
+5. frontend adapter
+6. 추측 코드 제거 검증(`rg "workflowStatusId.*pending|includes\\(\"pending"` 등)

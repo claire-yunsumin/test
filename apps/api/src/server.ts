@@ -4,21 +4,26 @@ import { z } from "zod";
 import {
   DEFAULT_WORKFLOW_STATUSES,
   LEGACY_STATE_TO_STATUS_ID,
+  type ApprovalDecisionValue,
   type ApprovalPolicy,
+  type ApprovalRequest,
   type DecisionType,
   type Mention,
   type Note,
   type Task,
+  type TaskAction,
   type TaskAttachment,
+  type TaskPermissions,
   type TaskState,
   type Template,
   type ThreadComment,
-  type WorkflowPhase
+  type WorkflowPhase,
+  type WorkflowRuntime
 } from "@hwe/shared";
 import { meId, authenticate, canEditForm, canEditTask, getVisibleTask, requireRole, validateMembers, validateMentions, validateNoteRefs, visibleTaskIdsFor, wouldCreateTaskCycle } from "./http/access.js";
 import { applySecurity, rateLimit } from "./http/security.js";
 import { optionalText, text } from "./http/validation.js";
-import { addEngagement, addInbox, addTimeline, applyTemplate, byId, calculateAnalytics, componentForEvent, data, now, serializeTask } from "./domain/store.js";
+import { addEngagement, addInbox, addTimeline, applyTaskSnapshots, applyTemplate, buildApprovalPolicySnapshot, byId, calculateAnalytics, componentForEvent, data, now, serializeTask } from "./domain/store.js";
 
 const port = Number(process.env.PORT ?? 4000);
 const templateTypes = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"] as const;
@@ -182,8 +187,8 @@ function workflowTransitionRule(task: Task, toStatusId: string, decisionType: De
 }
 
 function isPendingApprovalStatus(task: Task, statusId: string) {
-  const template = task.templateId ? byId(data.templates, task.templateId) ?? null : null;
-  const status = statusesForTemplate(template).find((row) => row.id === statusId);
+  const status = task.workflowSnapshot?.statuses?.find((row) => row.id === statusId)
+    ?? statusesForTemplate(task.templateId ? byId(data.templates, task.templateId) ?? null : null).find((row) => row.id === statusId);
   return status?.category === "PENDING_APPROVAL";
 }
 
@@ -232,6 +237,103 @@ function validatePolicyAfterTemplateChange(task: Task, template: Template): { va
     return { valid: false, reason: "기존 승인정책이 비활성화되었거나 삭제되었습니다." };
   }
   return { valid: true, reason: null };
+}
+
+function activeApprovalRequest(taskId: string) {
+  return data.approvalRequests.find((row) => row.taskId === taskId && row.status === "PENDING") ?? null;
+}
+
+function approversByPolicySnapshot(snapshot: NonNullable<ApprovalRequest["policySnapshot"]>) {
+  const lineApprovers = (snapshot.approvalLines ?? []).flatMap((line) => line.participantIds);
+  if (lineApprovers.length || snapshot.finalApproverId) {
+    return new Set([...lineApprovers, snapshot.finalApproverId].filter((id): id is string => Boolean(id && byId(data.members, id))));
+  }
+  if (snapshot.approverType === "MEMBER") {
+    return new Set((snapshot.approverIds ?? []).filter((id) => byId(data.members, id)));
+  }
+  const role = snapshot.approverRole ?? "OWNER";
+  return new Set(data.members.filter((member) => member.role === role || member.role === "ADMIN" || member.role === "SUPER_ADMIN").map((member) => member.id));
+}
+
+function applyWorkflowStatus(task: Task, targetStatusId: string) {
+  const targetState = stateFromStatusId(targetStatusId);
+  task.currentState = targetState;
+  task.workflowStatusId = targetStatusId;
+  if (targetState === "DRAFT") task.workflowPhase = "BACKLOG";
+  else if (targetState === "DONE" || targetState === "CANCELED") task.workflowPhase = "CLOSED";
+  else if ((task.workflowPhase ?? "BACKLOG") === "BACKLOG") task.workflowPhase = "ACTIVE";
+  task.updatedAt = now();
+  return targetState;
+}
+
+function workflowRuntime(task: Task): WorkflowRuntime {
+  const currentStatusId = task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState];
+  const statuses = task.workflowSnapshot?.statuses?.length
+    ? task.workflowSnapshot.statuses
+    : statusesForTemplate(task.templateId ? byId(data.templates, task.templateId) ?? null : null);
+  const transitions = task.workflowSnapshot?.transitions?.length
+    ? task.workflowSnapshot.transitions
+    : transitionsForTemplate(task.templateId ? byId(data.templates, task.templateId) ?? null : null);
+  const currentCategory = statuses.find((row) => row.id === currentStatusId)?.category ?? null;
+  return {
+    currentStatusId,
+    currentCategory,
+    statuses,
+    transitions,
+    pendingApproval: Boolean(activeApprovalRequest(task.id))
+  };
+}
+
+function taskPermissionsFor(req: express.Request, task: Task): TaskPermissions {
+  const openApproval = activeApprovalRequest(task.id);
+  const canDecideApproval = openApproval ? approversByPolicySnapshot(openApproval.policySnapshot).has(meId(req)) : false;
+  return {
+    canEditTask: canEditTask(req.user!, task),
+    canEditForm: canEditForm(req.user!, task),
+    canRequestApproval: canEditTask(req.user!, task) && !openApproval,
+    canDecideApproval
+  };
+}
+
+function availableActionsFor(req: express.Request, task: Task): TaskAction[] {
+  const runtime = workflowRuntime(task);
+  const permissions = taskPermissionsFor(req, task);
+  const openApproval = activeApprovalRequest(task.id);
+  if (openApproval) {
+    return permissions.canDecideApproval
+      ? [
+        { type: "DECIDE_APPROVAL", approvalRequestId: openApproval.id, decision: "APPROVE", label: "승인" },
+        { type: "DECIDE_APPROVAL", approvalRequestId: openApproval.id, decision: "REJECT", label: "반려" },
+        { type: "DECIDE_APPROVAL", approvalRequestId: openApproval.id, decision: "SUPPLEMENT_REQUEST", label: "보완 요청" }
+      ]
+      : [];
+  }
+  return runtime.transitions
+    .filter((row) => row.fromStatusId === runtime.currentStatusId)
+    .map((row) => {
+      const toState = stateFromStatusId(row.toStatusId);
+      const requiresApproval = Boolean(row.onExit?.approvalGate?.enabled || row.isDecision);
+      if (requiresApproval) {
+        return { type: "REQUEST_APPROVAL", toStatusId: row.toStatusId, toState, decisionType: row.decisionType, label: row.label };
+      }
+      return { type: "TRANSITION", toStatusId: row.toStatusId, toState, decisionType: row.decisionType, label: row.label, requiresApproval };
+    });
+}
+
+function serializeApprovalRequestSummary(request: ApprovalRequest | null) {
+  if (!request) return undefined;
+  return {
+    id: request.id,
+    taskId: request.taskId,
+    fromStatusId: request.fromStatusId,
+    targetStatusId: request.targetStatusId,
+    status: request.status,
+    requestedBy: request.requestedBy,
+    requestedAt: request.requestedAt,
+    reason: request.reason,
+    referencedNoteIds: request.referencedNoteIds,
+    policySnapshot: request.policySnapshot
+  };
 }
 
 function notifyMentions(req: express.Request, task: Task, mentions: Mention[], commentId: string) {
@@ -550,7 +652,7 @@ app.post("/api/tasks", (req, res) => {
     .parse(req.body);
 
   if (body.parentId && !getVisibleTask(req, res, body.parentId)) return;
-  const template = body.templateId ? byId(data.templates, body.templateId) : null;
+  const template = body.templateId ? byId(data.templates, body.templateId) ?? null : null;
   if (body.templateId && !template) {
     res.status(400).json({ error: "INVALID_TEMPLATE", requestId: req.requestId });
     return;
@@ -596,6 +698,14 @@ app.post("/api/tasks", (req, res) => {
     structureState: template || body.structureState === "TEMPLATED" ? "TEMPLATED" : "FREEFORM",
     templateType: template?.type ?? body.templateType ?? null,
     templateId: template?.id ?? null,
+    templateSnapshot: null,
+    workflowSnapshot: {
+      statuses: DEFAULT_WORKFLOW_STATUSES,
+      transitions: [],
+      capturedAt: now()
+    },
+    approvalPolicySnapshot: null,
+    formSnapshot: { fields: [], capturedAt: now() },
     currentState: stateFromStatusId(initialStatusId) ?? initialState,
     workflowStatusId: initialStatusId,
     workflowPhase: initialPhase,
@@ -617,10 +727,22 @@ app.post("/api/tasks", (req, res) => {
     ,
     attachmentIds: []
   };
+  applyTaskSnapshots(task, template, task.approvalPolicyId ? byId(data.approvalPolicies, task.approvalPolicyId) : null, task.createdAt);
 
   data.tasks.unshift(task);
   addEngagement({ type: "NODE_CREATED", actorId: meId(req), taskId: task.id, metadata: { structureState: task.structureState } });
   if (template) addEngagement({ type: "TEMPLATE_APPLIED", actorId: meId(req), taskId: task.id, targetId: template.id, metadata: { fields: template.formDefinition.length } });
+  if (template) {
+    addTimeline({
+      taskId: task.id,
+      type: "TEMPLATE_SNAPSHOT_APPLIED",
+      actorId: meId(req),
+      decisionType: null,
+      reason: "태스크 생성 시점 템플릿 스냅샷 고정",
+      referencedNoteIds: [],
+      payload: { templateId: template.id, version: template.version, workflowStatusId: task.workflowStatusId }
+    });
+  }
   addTimeline({
     taskId: task.id,
     type: "TASK_CREATED",
@@ -640,8 +762,15 @@ app.get("/api/tasks/:taskId", (req, res) => {
 	  task.lastSeenAtByUser[meId(req)] = now();
     addEngagement({ type: "VOLUNTARY_VISIT", actorId: meId(req), taskId: task.id, metadata: { source: "task-detail" } });
 	  const visibleIds = visibleTaskIdsFor(req.user!);
+    const permissions = taskPermissionsFor(req, task);
+    const openApproval = activeApprovalRequest(task.id);
 	  res.json({
 	    task: serializeTask(task),
+      templateSnapshot: task.templateSnapshot,
+      workflowRuntime: workflowRuntime(task),
+      activeApprovalRequest: serializeApprovalRequestSummary(openApproval),
+      availableActions: availableActionsFor(req, task),
+      permissions,
 	    parent: task.parentId ? serializeTask(byId(data.tasks, task.parentId)!) : null,
 	    children: data.tasks.filter((row) => row.parentId === task.id && visibleIds.has(row.id)).map(serializeTask),
       referenceableTasks: data.tasks.filter((row) => visibleIds.has(row.id)).map(serializeTask),
@@ -650,11 +779,7 @@ app.get("/api/tasks/:taskId", (req, res) => {
 	    referenceableNotes: data.notes.filter((note) => visibleIds.has(note.taskId)),
 	    comments: data.comments.filter((comment) => comment.taskId === task.id),
 	    timeline: data.timeline.filter((event) => event.taskId === task.id),
-	    members: data.members,
-      permissions: {
-        canEditTask: canEditTask(req.user!, task),
-        canEditForm: canEditForm(req.user!, task)
-      }
+	    members: data.members
   });
 });
 
@@ -808,6 +933,7 @@ app.patch("/api/tasks/:taskId", (req, res) => {
     task.templateType = patch.templateType ?? task.templateType;
     task.structureState = "FREEFORM";
     task.workflowStatusId = LEGACY_STATE_TO_STATUS_ID[task.currentState];
+    applyTaskSnapshots(task, null, task.approvalPolicyId ? byId(data.approvalPolicies, task.approvalPolicyId) : null);
     task.policyReviewRequired = false;
     task.policyReviewReason = null;
     addTimeline({
@@ -851,6 +977,9 @@ app.patch("/api/tasks/:taskId", (req, res) => {
   delete assignablePatch.phaseOverride;
 
   Object.assign(task, assignablePatch, { updatedAt: now() });
+  if (patch.approvalPolicyId !== undefined) {
+    task.approvalPolicySnapshot = buildApprovalPolicySnapshot(task.approvalPolicyId ? byId(data.approvalPolicies, task.approvalPolicyId) : null);
+  }
   addEngagement({ type: patch.formValues ? "FORM_SAVED" : "NODE_UPDATED", actorId: meId(req), taskId: task.id, metadata: { afterFeedback: Boolean(patch.formValues) } });
   addTimeline({
     taskId: task.id,
@@ -876,6 +1005,273 @@ app.delete("/api/tasks/:taskId", (req, res) => {
   res.json({ ok: true, deletedIds });
 });
 
+const transitionBodySchema = z.object({
+  toState: z.enum(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"]),
+  toStatusId: z.string().optional(),
+  decisionType: z.enum(["APPROVE", "REJECT", "SUPPLEMENT", "STATE_ONLY"]).default("STATE_ONLY"),
+  reason: text(1, 1200),
+  referencedNoteIds: z.array(z.string()).max(20).default([])
+});
+
+const approvalRequestBodySchema = z.object({
+  targetStatusId: z.string().optional(),
+  toStatusId: z.string().optional(),
+  toState: z.enum(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"]).optional(),
+  decisionType: z.enum(["APPROVE", "REJECT", "SUPPLEMENT", "STATE_ONLY"]).default("APPROVE"),
+  reason: text(1, 1200),
+  referencedNoteIds: z.array(z.string()).max(20).default([]),
+  approvalPolicyId: z.string().nullable().optional()
+});
+
+const approvalDecisionBodySchema = z.object({
+  decision: z.enum(["APPROVE", "REJECT", "SUPPLEMENT_REQUEST"]),
+  reason: text(1, 1200),
+  referencedNoteIds: z.array(z.string()).max(20).default([])
+});
+
+function resolveApprovalPolicy(task: Task, policyId?: string | null, matchedTransition?: ReturnType<typeof workflowTransitionRule>) {
+  const unitDefaultPolicyId = byId(data.units, task.unitId)?.defaultApprovalPolicyId ?? undefined;
+  const transitionPolicyId = matchedTransition?.onExit?.approvalGate?.policyId ?? undefined;
+  const selectedPolicyId = policyId !== undefined
+    ? (policyId ?? undefined)
+    : (transitionPolicyId ?? task.approvalPolicyId ?? unitDefaultPolicyId ?? undefined);
+  const selectedPolicy = selectedPolicyId ? byId(data.approvalPolicies, selectedPolicyId) : null;
+  return { selectedPolicyId, selectedPolicy, transitionPolicyId };
+}
+
+function notifyTransition(req: express.Request, task: Task, eventType: ReturnType<typeof addTimeline>["type"], title: string, message: string, recipients: Set<string>) {
+  recipients.delete(meId(req));
+  recipients.forEach((userId) => {
+    addInbox({
+      userId,
+      taskId: task.id,
+      componentType: componentForEvent(eventType),
+      eventType,
+      title,
+      message,
+      sourceUserId: meId(req)
+    });
+  });
+}
+
+function performTaskTransition(req: express.Request, res: express.Response, task: Task, body: z.infer<typeof transitionBodySchema>) {
+  if (!requireRole(req, res, "MEMBER")) return null;
+  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
+    res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
+    return null;
+  }
+  const fromState = task.currentState;
+  const fromStatusId = task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState];
+  const targetStatusId = body.toStatusId ?? LEGACY_STATE_TO_STATUS_ID[body.toState];
+  const targetState = stateFromStatusId(targetStatusId);
+  const matchedWorkflowTransition = workflowTransitionRule(task, targetStatusId, body.decisionType);
+  if (matchedWorkflowTransition?.onExit?.approvalGate?.enabled || matchedWorkflowTransition?.isDecision) {
+    res.status(400).json({ error: "APPROVAL_REQUEST_REQUIRED", requestId: req.requestId });
+    return null;
+  }
+  if (!matchedWorkflowTransition && !isAllowedTransition(fromState, body.toState, body.decisionType)) {
+    res.status(400).json({ error: "INVALID_TRANSITION", requestId: req.requestId });
+    return null;
+  }
+  applyWorkflowStatus(task, targetStatusId);
+  const eventType = targetState === "DONE" ? "COMPLETED" : targetState === "CANCELED" ? "CANCELED" : "TASK_TRANSITIONED";
+  const event = addTimeline({
+    taskId: task.id,
+    type: eventType,
+    actorId: meId(req),
+    decisionType: body.decisionType,
+    reason: body.reason,
+    referencedNoteIds: body.referencedNoteIds,
+    payload: {
+      fromState,
+      toState: targetState,
+      fromStatusId,
+      toStatusId: targetStatusId,
+      templateSnapshotId: task.templateSnapshot?.templateId ?? null,
+      workflowSnapshotAt: task.workflowSnapshot?.capturedAt ?? null,
+      formSnapshotAt: task.formSnapshot?.capturedAt ?? null
+    }
+  });
+  addEngagement({ type: "DECISION_TRANSITION", actorId: meId(req), taskId: task.id, metadata: { toState: targetState, toStatusId: targetStatusId, decisionType: body.decisionType } });
+  const recipients = new Set([...task.assigneeIds, ...task.watcherIds, task.ownerId]);
+  notifyTransition(req, task, event.type, "상태 변경", `${task.title}: ${fromState} -> ${targetState} · ${body.reason}`, recipients);
+  return { task: serializeTask(task), event };
+}
+
+function performApprovalRequest(req: express.Request, res: express.Response, task: Task, body: z.infer<typeof approvalRequestBodySchema>) {
+  if (!requireRole(req, res, "MEMBER")) return null;
+  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
+    res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
+    return null;
+  }
+  if (activeApprovalRequest(task.id)) {
+    res.status(409).json({ error: "APPROVAL_ALREADY_PENDING", requestId: req.requestId });
+    return null;
+  }
+  const fromStatusId = task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState];
+  const targetStatusId = body.targetStatusId ?? body.toStatusId ?? (body.toState ? LEGACY_STATE_TO_STATUS_ID[body.toState] : LEGACY_STATE_TO_STATUS_ID.DONE);
+  const matchedWorkflowTransition = workflowTransitionRule(task, targetStatusId, body.decisionType);
+  if (!matchedWorkflowTransition && !isAllowedTransition(task.currentState, stateFromStatusId(targetStatusId), body.decisionType)) {
+    res.status(400).json({ error: "INVALID_TRANSITION", requestId: req.requestId });
+    return null;
+  }
+  const { selectedPolicyId, selectedPolicy, transitionPolicyId } = resolveApprovalPolicy(task, body.approvalPolicyId, matchedWorkflowTransition);
+  if (!selectedPolicyId) {
+    res.status(400).json({ error: "APPROVAL_POLICY_REQUIRED", requestId: req.requestId });
+    return null;
+  }
+  if (!selectedPolicy || !selectedPolicy.enabled) {
+    res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
+    return null;
+  }
+  const policySnapshot = buildApprovalPolicySnapshot(selectedPolicy);
+  if (!policySnapshot) {
+    res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
+    return null;
+  }
+  task.approvalPolicyId = selectedPolicy.id;
+  task.approvalPolicySnapshot = policySnapshot;
+  task.updatedAt = now();
+  const requestRow: ApprovalRequest = {
+    id: `apr-${crypto.randomUUID()}`,
+    taskId: task.id,
+    fromStatusId,
+    targetStatusId,
+    policySnapshot,
+    status: "PENDING",
+    requestedBy: meId(req),
+    requestedAt: now(),
+    reason: body.reason,
+    referencedNoteIds: body.referencedNoteIds,
+    decidedAt: null
+  };
+  data.approvalRequests.unshift(requestRow);
+  const event = addTimeline({
+    taskId: task.id,
+    type: "APPROVAL_REQUESTED",
+    actorId: meId(req),
+    decisionType: body.decisionType,
+    reason: body.reason,
+    referencedNoteIds: body.referencedNoteIds,
+    payload: {
+      approvalRequestId: requestRow.id,
+      fromStatusId,
+      targetStatusId,
+      approvalPolicyId: selectedPolicy.id,
+      approvalMode: selectedPolicy.mode,
+      approvalLineCount: selectedPolicy.approvalLines?.length ?? 0,
+      finalApproverId: selectedPolicy.finalApproverId ?? null,
+      transitionApprovalEnabled: Boolean(matchedWorkflowTransition?.onExit?.approvalGate?.enabled),
+      transitionApprovalPolicyId: transitionPolicyId ?? null,
+      templateSnapshotId: task.templateSnapshot?.templateId ?? null,
+      workflowSnapshotAt: task.workflowSnapshot?.capturedAt ?? null,
+      formSnapshotAt: task.formSnapshot?.capturedAt ?? null
+    }
+  });
+  addEngagement({ type: "DECISION_TRANSITION", actorId: meId(req), taskId: task.id, metadata: { toStatusId: targetStatusId, decisionType: body.decisionType, approvalRequestId: requestRow.id } });
+  const recipients = new Set([...task.assigneeIds, ...task.watcherIds, task.ownerId, ...approversByPolicySnapshot(policySnapshot)]);
+  notifyTransition(req, task, event.type, "승인 검토 대기", `${task.title}: ${body.reason}`, recipients);
+  return { task: serializeTask(task), approvalRequest: serializeApprovalRequestSummary(requestRow), event };
+}
+
+function performApprovalDecision(req: express.Request, res: express.Response, approvalRequestId: string, body: z.infer<typeof approvalDecisionBodySchema>) {
+  const requestRow = byId(data.approvalRequests, approvalRequestId);
+  if (!requestRow) {
+    res.status(404).json({ error: "APPROVAL_REQUEST_NOT_FOUND", requestId: req.requestId });
+    return null;
+  }
+  const task = getVisibleTask(req, res, requestRow.taskId);
+  if (!task) return null;
+  if (requestRow.status !== "PENDING") {
+    res.status(409).json({ error: "APPROVAL_REQUEST_CLOSED", requestId: req.requestId });
+    return null;
+  }
+  if (!approversByPolicySnapshot(requestRow.policySnapshot).has(meId(req))) {
+    res.status(403).json({ error: "NOT_POLICY_APPROVER", requestId: req.requestId });
+    return null;
+  }
+  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
+    res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });
+    return null;
+  }
+  const decision = {
+    id: `apd-${crypto.randomUUID()}`,
+    approvalRequestId: requestRow.id,
+    approverId: meId(req),
+    decision: body.decision as ApprovalDecisionValue,
+    reason: body.reason,
+    referencedNoteIds: body.referencedNoteIds,
+    decidedAt: now()
+  };
+  data.approvalDecisions.unshift(decision);
+  const fromStatusId = task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState];
+  if (body.decision === "APPROVE") {
+    requestRow.status = "APPROVED";
+    requestRow.decidedAt = decision.decidedAt;
+    applyWorkflowStatus(task, requestRow.targetStatusId);
+  } else if (body.decision === "REJECT") {
+    requestRow.status = "REJECTED";
+    requestRow.decidedAt = decision.decidedAt;
+    applyWorkflowStatus(task, LEGACY_STATE_TO_STATUS_ID.CANCELED);
+  } else {
+    requestRow.status = "SUPPLEMENT_REQUESTED";
+    requestRow.decidedAt = decision.decidedAt;
+  }
+  const eventType = body.decision === "APPROVE"
+    ? "APPROVAL_APPROVED"
+    : body.decision === "REJECT"
+      ? "APPROVAL_REJECTED"
+      : "APPROVAL_SUPPLEMENT_REQUESTED";
+  const event = addTimeline({
+    taskId: task.id,
+    type: eventType,
+    actorId: meId(req),
+    decisionType: body.decision === "SUPPLEMENT_REQUEST" ? "SUPPLEMENT" : body.decision,
+    reason: body.reason,
+    referencedNoteIds: [...new Set([...requestRow.referencedNoteIds, ...body.referencedNoteIds])],
+    payload: {
+      approvalRequestId: requestRow.id,
+      approvalDecisionId: decision.id,
+      fromStatusId,
+      toStatusId: task.workflowStatusId ?? fromStatusId,
+      targetStatusId: requestRow.targetStatusId,
+      approvalPolicyId: requestRow.policySnapshot.policyId,
+      approvalMode: requestRow.policySnapshot.mode,
+      approvalLineCount: requestRow.policySnapshot.approvalLines?.length ?? 0,
+      finalApproverId: requestRow.policySnapshot.finalApproverId ?? null,
+      templateSnapshotId: task.templateSnapshot?.templateId ?? null,
+      workflowSnapshotAt: task.workflowSnapshot?.capturedAt ?? null,
+      formSnapshotAt: task.formSnapshot?.capturedAt ?? null
+    }
+  });
+  addEngagement({ type: "DECISION_TRANSITION", actorId: meId(req), taskId: task.id, metadata: { decision: body.decision, approvalRequestId: requestRow.id } });
+  const recipients = new Set([...task.assigneeIds, ...task.watcherIds, task.ownerId, requestRow.requestedBy]);
+  notifyTransition(req, task, event.type, eventType === "APPROVAL_APPROVED" ? "승인 완료" : eventType === "APPROVAL_REJECTED" ? "반려 완료" : "보완 요청", `${task.title}: ${body.reason}`, recipients);
+  return { task: serializeTask(task), approvalRequest: serializeApprovalRequestSummary(requestRow), decision, event };
+}
+
+app.post("/api/tasks/:taskId/transitions", (req, res) => {
+  const task = getVisibleTask(req, res, req.params.taskId);
+  if (!task) return;
+  const body = transitionBodySchema.parse(req.body);
+  const result = performTaskTransition(req, res, task, body);
+  if (result) res.json(result);
+});
+
+app.post("/api/tasks/:taskId/approval-requests", (req, res) => {
+  const task = getVisibleTask(req, res, req.params.taskId);
+  if (!task) return;
+  const body = approvalRequestBodySchema.parse(req.body);
+  const result = performApprovalRequest(req, res, task, body);
+  if (result) res.status(201).json(result);
+});
+
+app.post("/api/approval-requests/:approvalRequestId/decisions", (req, res) => {
+  const body = approvalDecisionBodySchema.parse(req.body);
+  const result = performApprovalDecision(req, res, req.params.approvalRequestId, body);
+  if (result) res.json(result);
+});
+
 app.post("/api/tasks/:taskId/transition", (req, res) => {
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
@@ -890,7 +1286,43 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
     })
     .parse(req.body) as { toState: TaskState; toStatusId?: string; decisionType: DecisionType; reason: string; referencedNoteIds: string[]; approvalPolicyId?: string | null };
 
-  const isDecision = body.decisionType !== "STATE_ONLY";
+  const legacyTargetStatusId = body.toStatusId ?? LEGACY_STATE_TO_STATUS_ID[body.toState];
+  const legacyMatchedTransition = workflowTransitionRule(task, legacyTargetStatusId, body.decisionType);
+  if (body.approvalPolicyId !== undefined && body.approvalPolicyId !== null && !data.approvalPolicies.some((row) => row.id === body.approvalPolicyId && row.enabled)) {
+    res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
+    return;
+  }
+  if (body.decisionType === "STATE_ONLY") {
+    const result = performTaskTransition(req, res, task, body);
+    if (result) res.json(result);
+    return;
+  }
+  const openApproval = activeApprovalRequest(task.id);
+  if (openApproval) {
+    const decision = body.decisionType === "SUPPLEMENT" ? "SUPPLEMENT_REQUEST" : body.decisionType as ApprovalDecisionValue;
+    const result = performApprovalDecision(req, res, openApproval.id, {
+      decision,
+      reason: body.reason,
+      referencedNoteIds: body.referencedNoteIds
+    });
+    if (result) res.json(result);
+    return;
+  }
+  if (legacyMatchedTransition?.onExit?.approvalGate?.enabled || isPendingApprovalStatus(task, legacyTargetStatusId)) {
+    const result = performApprovalRequest(req, res, task, {
+      targetStatusId: legacyTargetStatusId,
+      toStatusId: body.toStatusId,
+      toState: body.toState,
+      decisionType: body.decisionType,
+      reason: body.reason,
+      referencedNoteIds: body.referencedNoteIds,
+      approvalPolicyId: body.approvalPolicyId
+    });
+    if (result) res.json(result);
+    return;
+  }
+
+  const isDecision = true;
   if (!requireRole(req, res, isDecision ? "OWNER" : "MEMBER")) return;
 	  if (!validateNoteRefs(req.user!, body.referencedNoteIds)) {
     res.status(400).json({ error: "INVALID_NOTE_REFERENCE", requestId: req.requestId });

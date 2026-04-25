@@ -40,8 +40,9 @@
 | SV-01 | `PATCH /api/tasks/:taskId` | `templateId` 유효성(존재/활성) | `INVALID_TEMPLATE` |
 | SV-02 | `PATCH /api/tasks/:taskId` | 전환 후 `workflowStatusId`가 대상 템플릿 상태셋에 포함되는지 | `WORKFLOW_STATUS_MAPPING_REQUIRED` |
 | SV-03 | `PATCH /api/tasks/:taskId` | `approvalPolicyId` 유효성(존재/활성) | `INVALID_APPROVAL_POLICY` |
-| SV-04 | `POST /api/tasks/:taskId/transition` | 승인게이트 on 상태에서 정책/승인자 조건 충족 | `APPROVAL_POLICY_REQUIRED` / `NOT_POLICY_APPROVER` |
-| SV-05 | `PATCH /api/tasks/:taskId` | 템플릿 전환 결과에 따라 이벤트 타입(`TEMPLATE_APPLIED/REPLACED/REMOVED`)을 기록한다 | N/A (기록 보장 규칙) |
+| SV-04 | `POST /api/tasks/:taskId/approval-requests` / `POST /api/approval-requests/:approvalRequestId/decisions` | 승인게이트 on 상태에서 정책/승인자 조건 충족 | `APPROVAL_POLICY_REQUIRED` / `NOT_POLICY_APPROVER` |
+| SV-05 | `POST /api/tasks/:taskId/approval-requests` | 열린 승인 요청 중복 차단 | `APPROVAL_ALREADY_PENDING` |
+| SV-06 | `PATCH /api/tasks/:taskId` | 템플릿 전환 결과에 따라 이벤트 타입(`TEMPLATE_APPLIED/REPLACED/REMOVED`)을 기록한다 | N/A (기록 보장 규칙) |
 
 ## 타임라인 이벤트 스키마
 

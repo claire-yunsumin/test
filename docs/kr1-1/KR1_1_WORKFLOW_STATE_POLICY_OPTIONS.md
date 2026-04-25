@@ -91,5 +91,5 @@
 
 | 항목 | 결과 | 근거 |
 | --- | --- | --- |
-| API 회귀 테스트 | 통과 | `npm run test -w apps/api` → `35 passed / 0 failed` |
+| API 회귀 테스트 | 통과 | `npm run test -w apps/api` → `36 passed / 0 failed` |
 | KR1.1 전환 정책 스위트 | 통과 | `KR1.1 transition policy (KR11-TP-v1)` 4개 시나리오 모두 통과 |
