@@ -29,6 +29,10 @@ function normalizeLegacyFileFields(source: AppData): AppData {
   }));
   source.templates = source.templates.map((template) => ({
     ...template,
+    lifecycleStatus: template.lifecycleStatus ?? "ACTIVE",
+    purposeTag: template.purposeTag ?? null,
+    successOutcome: template.successOutcome ?? null,
+    fingerprint: template.fingerprint ?? null,
     formDefinition: stripLegacyFileFieldsFromDefinition(template.formDefinition)
   }));
   return source;

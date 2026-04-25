@@ -65,17 +65,30 @@
 - 리스트 이동
 - 워크스페이스 탐색 필터
 
+추가 요구사항(태스크 CRUD 거버넌스):
+
+- 태스크 CRUD는 권한/가시성 검증과 무결성 검증을 동시에 통과해야 합니다.
+- 수정(Update) 요청은 관계 cycle, 참조 무결성, 워크플로우 정합성을 함께 검증해야 합니다.
+- 상태 전이 기반 수정은 `reason` 필수와 이벤트 기록(타임라인/Inbox)을 강제해야 합니다.
+- 삭제(Delete)는 영향 범위를 사전 고지하고, soft delete 우선 정책을 지원해야 합니다.
+- 복구(restore) 경로가 있는 경우 복구 시점에 parent/권한/템플릿 정합성 재검증이 필요합니다.
+
 ## 4. Work Graph와 템플릿
 
 시스템 요구사항:
 
 - `templateId`와 `templateType`은 nullable입니다.
 - 태스크는 `FREEFORM`과 `TEMPLATED` 상태를 모두 지원합니다.
+- 템플릿은 lifecycle(`DRAFT/ACTIVE/DEPRECATED/ARCHIVED`) 상태를 가져야 합니다.
 - 템플릿 적용 시 `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
 - Form Output 저장은 템플릿 필드 정의와 호환되어야 합니다.
+- 템플릿 생성/수정 시 목적(`purposeTag`)과 기대 결과(`successOutcome`)를 관리할 수 있어야 합니다.
+- 템플릿 생성/수정/워크플로우 저장 시 fingerprint를 갱신하고 유사 후보를 계산할 수 있어야 합니다.
 - 레거시 파일 필드(`__task_files`, `FILE` type)는 Form Output/Template 저장 시 제거되어야 하며 재유입되면 안 됩니다.
 - 자유폼 Form Output 편집은 블록 단위 추가/편집 흐름을 지원해야 합니다.
 - parent 변경은 Work Graph cycle을 만들 수 없습니다.
+- 템플릿 센터는 lifecycle 필터/검색/정렬/페이지네이션을 지원해야 합니다.
+- 태스크 상세 템플릿 셀렉터는 `DEPRECATED/ARCHIVED`를 기본 숨김하되 현재 연결 템플릿은 예외적으로 노출해야 합니다.
 
 영향 영역:
 

@@ -22,6 +22,7 @@ import { addEngagement, addInbox, addTimeline, applyTemplate, byId, calculateAna
 
 const port = Number(process.env.PORT ?? 4000);
 const templateTypes = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"] as const;
+const templateLifecycleStatuses = ["DRAFT", "ACTIVE", "DEPRECATED", "ARCHIVED"] as const;
 const LEGACY_TASK_FILES_FIELD_KEY = "__task_files";
 const mentionSchema = z.object({
   type: z.enum(["MEMBER", "TASK", "FORM_FIELD", "NOTE"]),
@@ -87,6 +88,50 @@ function sanitizeLegacyFormValues(values: Record<string, string> | undefined) {
 function sanitizeLegacyFormDefinition<T extends { key: string; type: string }>(fields: T[] | undefined) {
   if (!fields) return fields;
   return fields.filter((field) => field.type !== "FILE" && field.key !== LEGACY_TASK_FILES_FIELD_KEY);
+}
+
+function buildTemplateFingerprint(template: {
+  type: string;
+  formDefinition: Array<{ key: string; type: string; required?: boolean }>;
+  workflowSchema?: Template["workflowSchema"];
+}) {
+  const fieldPart = [...template.formDefinition]
+    .map((field) => `${field.key}:${field.type}:${field.required ? "req" : "opt"}`)
+    .sort()
+    .join("|");
+  const statuses = template.workflowSchema?.statuses ?? [];
+  const transitions = template.workflowSchema?.transitions ?? [];
+  const statusPart = [...statuses].map((row) => `${row.id}:${row.category}:${row.isDefault ? 1 : 0}`).sort().join("|");
+  const transitionPart = [...transitions]
+    .map((row) => `${row.fromStatusId}->${row.toStatusId}:${row.decisionType}:${row.isDecision ? 1 : 0}`)
+    .sort()
+    .join("|");
+  return `${template.type}::${fieldPart}::${statusPart}::${transitionPart}`;
+}
+
+function fingerprintTokens(fingerprint: string) {
+  return new Set(
+    fingerprint
+      .split(/[:|]/g)
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+}
+
+function duplicateTemplateCandidates(source: Template, excludeId?: string) {
+  const sourceTokens = fingerprintTokens(source.fingerprint ?? buildTemplateFingerprint(source));
+  const rows = data.templates
+    .filter((row) => row.id !== source.id && row.id !== excludeId)
+    .map((row) => {
+      const targetTokens = fingerprintTokens(row.fingerprint ?? buildTemplateFingerprint(row));
+      const intersection = [...sourceTokens].filter((token) => targetTokens.has(token)).length;
+      const union = new Set([...sourceTokens, ...targetTokens]).size;
+      const score = union ? intersection / union : 0;
+      return { id: row.id, name: row.name, score: Number(score.toFixed(2)) };
+    })
+    .filter((row) => row.score >= 0.8)
+    .sort((a, b) => b.score - a.score);
+  return rows.slice(0, 5);
 }
 
 function statusesForTemplate(template: Template | null) {
@@ -1369,8 +1414,12 @@ app.delete("/api/push/subscriptions", (req, res) => {
   res.json({ ok: true, removed: before - data.webPushSubscriptions.length });
 });
 
-app.get("/api/templates", (_req, res) => {
-  res.json(data.templates);
+app.get("/api/templates", (req, res) => {
+  const includeArchived = String(req.query.includeArchived ?? "false") === "true";
+  const rows = includeArchived
+    ? data.templates
+    : data.templates.filter((template) => template.lifecycleStatus !== "ARCHIVED");
+  res.json(rows);
 });
 
 app.get("/api/workflow/statuses", (_req, res) => {
@@ -1397,6 +1446,9 @@ app.post("/api/templates", (req, res) => {
     name: text(1, 120),
     type: z.enum(templateTypes),
     enabled: z.boolean().default(true),
+    lifecycleStatus: z.enum(templateLifecycleStatuses).default("ACTIVE"),
+    purposeTag: optionalText(80),
+    successOutcome: optionalText(240),
     formDefinition: z.array(z.object({
       key: z.string().min(1).max(80),
       label: z.string().min(1).max(120),
@@ -1414,6 +1466,10 @@ app.post("/api/templates", (req, res) => {
     type: body.type,
     version: 1,
     enabled: body.enabled,
+    lifecycleStatus: body.lifecycleStatus,
+    purposeTag: body.purposeTag ?? null,
+    successOutcome: body.successOutcome ?? null,
+    fingerprint: null,
     formDefinition: sanitizedFormDefinition,
     inspectionCriteria: body.inspectionCriteria,
     workflow: [
@@ -1421,8 +1477,10 @@ app.post("/api/templates", (req, res) => {
       { from: "IN_PROGRESS", to: "DONE", label: "완료", isDecision: body.type !== "TASK", decisionType: body.type === "TASK" ? "STATE_ONLY" : "APPROVE" }
     ]
   };
+  template.fingerprint = buildTemplateFingerprint(template);
+  const duplicateCandidates = duplicateTemplateCandidates(template);
   data.templates.unshift(template);
-  res.status(201).json(template);
+  res.status(201).json({ ...template, duplicateCandidates });
 });
 
 app.patch("/api/templates/:templateId", (req, res) => {
@@ -1433,6 +1491,9 @@ app.patch("/api/templates/:templateId", (req, res) => {
     name: optionalText(120),
     type: z.enum(templateTypes).optional(),
     enabled: z.boolean().optional(),
+    lifecycleStatus: z.enum(templateLifecycleStatuses).optional(),
+    purposeTag: optionalText(80),
+    successOutcome: optionalText(240),
     formDefinition: z.array(z.object({
       key: z.string().min(1).max(80),
       label: z.string().min(1).max(120),
@@ -1447,8 +1508,12 @@ app.patch("/api/templates/:templateId", (req, res) => {
     body.formDefinition = sanitizeLegacyFormDefinition(body.formDefinition);
   }
   Object.assign(template, body);
+  template.purposeTag = template.purposeTag ?? null;
+  template.successOutcome = template.successOutcome ?? null;
+  template.fingerprint = buildTemplateFingerprint(template);
   template.version += 1;
-  res.json(template);
+  const duplicateCandidates = duplicateTemplateCandidates(template, template.id);
+  res.json({ ...template, duplicateCandidates });
 });
 
 app.patch("/api/templates/:templateId/workflow", (req, res) => {
@@ -1504,8 +1569,10 @@ app.patch("/api/templates/:templateId/workflow", (req, res) => {
     isDecision: row.isDecision,
     decisionType: row.decisionType
   }));
+  template.fingerprint = buildTemplateFingerprint(template);
   template.version += 1;
-  res.json(template);
+  const duplicateCandidates = duplicateTemplateCandidates(template, template.id);
+  res.json({ ...template, duplicateCandidates });
 });
 
 app.delete("/api/templates/:templateId", (req, res) => {

@@ -21,6 +21,7 @@ import {
   type TaskAttachment,
   type TaskState,
   type Template,
+  type TemplateLifecycleStatus,
   type TemplateType,
   type ThreadComment,
   type TimelineEvent,
@@ -1206,13 +1207,61 @@ export function TemplatesView({
   const [name, setName] = useState("");
   const [type, setType] = useState<TemplateType>("TASK");
   const [enabled, setEnabled] = useState(true);
+  const [lifecycleStatus, setLifecycleStatus] = useState<TemplateLifecycleStatus>("ACTIVE");
+  const [purposeTag, setPurposeTag] = useState("");
+  const [successOutcome, setSuccessOutcome] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusJson, setStatusJson] = useState(() => JSON.stringify(workflowStatuses, null, 2));
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<TemplateType | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | TemplateLifecycleStatus>("ACTIVE");
+  const [sortBy, setSortBy] = useState<"name" | "updated" | "version">("updated");
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   useEffect(() => {
     setStatusJson(JSON.stringify(workflowStatuses, null, 2));
   }, [workflowStatuses]);
+  useEffect(() => {
+    setPage(1);
+  }, [query, typeFilter, statusFilter, sortBy]);
+
+  const filteredTemplates = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const rows = templates
+      .filter((template) => {
+        if (statusFilter !== "ALL" && (template.lifecycleStatus ?? "ACTIVE") !== statusFilter) return false;
+        if (typeFilter !== "ALL" && template.type !== typeFilter) return false;
+        if (!q) return true;
+        return `${template.name} ${template.type} ${template.purposeTag ?? ""} ${template.successOutcome ?? ""}`.toLowerCase().includes(q);
+      })
+      .sort((a, b) => {
+        if (sortBy === "name") return a.name.localeCompare(b.name, "ko");
+        if (sortBy === "version") return b.version - a.version;
+        return b.id.localeCompare(a.id);
+      });
+    return rows;
+  }, [templates, query, typeFilter, statusFilter, sortBy]);
+  const totalPages = Math.max(1, Math.ceil(filteredTemplates.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pagedTemplates = filteredTemplates.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const duplicateCountByTemplateId = useMemo(() => {
+    const groups = new Map<string, string[]>();
+    templates.forEach((template) => {
+      const key = template.fingerprint ?? "";
+      if (!key) return;
+      const rows = groups.get(key) ?? [];
+      rows.push(template.id);
+      groups.set(key, rows);
+    });
+    const result = new Map<string, number>();
+    groups.forEach((ids) => {
+      if (ids.length < 2) return;
+      ids.forEach((id) => result.set(id, ids.length - 1));
+    });
+    return result;
+  }, [templates]);
 
   const createTemplate = async (event: FormEvent) => {
     event.preventDefault();
@@ -1220,8 +1269,16 @@ export function TemplatesView({
     try {
       setBusy(true);
       setError(null);
-      await request("/api/templates", { method: "POST", body: JSON.stringify({ name, type, enabled }) });
+      const created = await request<{ duplicateCandidates?: Array<{ id: string; name: string; score: number }> }>("/api/templates", {
+        method: "POST",
+        body: JSON.stringify({ name, type, enabled, lifecycleStatus, purposeTag, successOutcome })
+      });
+      if (created.duplicateCandidates?.length) {
+        setError(`유사 템플릿 후보: ${created.duplicateCandidates.map((row) => `${row.name}(${Math.round(row.score * 100)}%)`).join(", ")}`);
+      }
       setName("");
+      setPurposeTag("");
+      setSuccessOutcome("");
       await onReload();
     } catch (err) {
       setError(
@@ -1266,9 +1323,46 @@ export function TemplatesView({
           </button>
         </div>
       </section>
+      <FilterShell
+        meta={<small>총 {filteredTemplates.length}개 · 페이지 {currentPage}/{totalPages}</small>}
+        action={(
+          <div className="row-actions">
+            <button className="button secondary" disabled={currentPage <= 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>이전</button>
+            <button className="button secondary" disabled={currentPage >= totalPages} onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}>다음</button>
+          </div>
+        )}
+      >
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="템플릿 이름 검색" />
+        <Select
+          tone="filter"
+          value={statusFilter}
+          onChange={(value) => setStatusFilter(value as "ALL" | TemplateLifecycleStatus)}
+          options={[["ACTIVE", "Active"], ["DRAFT", "Draft"], ["DEPRECATED", "Deprecated"], ["ARCHIVED", "Archived"], ["ALL", "전체"]]}
+        />
+        <Select
+          tone="filter"
+          value={typeFilter}
+          onChange={(value) => setTypeFilter(value as TemplateType | "ALL")}
+          options={[["ALL", "유형 전체"], ...templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label] as [string, string])]}
+        />
+        <Select
+          tone="filter"
+          value={sortBy}
+          onChange={(value) => setSortBy(value as "name" | "updated" | "version")}
+          options={[["updated", "정렬: 최근"], ["name", "정렬: 이름"], ["version", "정렬: 버전"]]}
+        />
+      </FilterShell>
       <form className="create-card template-create" onSubmit={createTemplate}>
         <input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="템플릿 이름" />
         <Select label="유형" value={type} onChange={(value) => setType(value as TemplateType)} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
+        <Select
+          label="라이프사이클"
+          value={lifecycleStatus}
+          onChange={(value) => setLifecycleStatus(value as TemplateLifecycleStatus)}
+          options={[["DRAFT", "Draft"], ["ACTIVE", "Active"], ["DEPRECATED", "Deprecated"], ["ARCHIVED", "Archived"]]}
+        />
+        <input value={purposeTag} maxLength={80} onChange={(event) => setPurposeTag(event.target.value)} placeholder="목적 태그 (예: release-readiness)" />
+        <input value={successOutcome} maxLength={240} onChange={(event) => setSuccessOutcome(event.target.value)} placeholder="성공 결과(의사결정 목표)" />
         <label className="toggle-row">
           <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
           활성화
@@ -1277,8 +1371,14 @@ export function TemplatesView({
       </form>
       {error && <div className="inline-error">{error}</div>}
       <div className="template-grid">
-        {templates.map((template) => (
-          <TemplateCard key={template.id} template={template} workflowStatuses={workflowStatuses} onReload={onReload} />
+        {pagedTemplates.map((template) => (
+          <TemplateCard
+            key={template.id}
+            template={template}
+            workflowStatuses={workflowStatuses}
+            duplicateCount={duplicateCountByTemplateId.get(template.id) ?? 0}
+            onReload={onReload}
+          />
         ))}
       </div>
     </section>
@@ -1288,10 +1388,12 @@ export function TemplatesView({
 function TemplateCard({
   template,
   workflowStatuses,
+  duplicateCount,
   onReload
 }: {
   template: Template;
   workflowStatuses: AppData["workflowStatuses"];
+  duplicateCount: number;
   onReload: () => Promise<void>;
 }) {
   const normalizeWorkflowSchemaDraft = (raw: unknown) => {
@@ -1331,7 +1433,14 @@ function TemplateCard({
     return { statuses, transitions };
   };
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ name: template.name, type: template.type, enabled: template.enabled });
+  const [draft, setDraft] = useState({
+    name: template.name,
+    type: template.type,
+    enabled: template.enabled,
+    lifecycleStatus: template.lifecycleStatus ?? "ACTIVE",
+    purposeTag: template.purposeTag ?? "",
+    successOutcome: template.successOutcome ?? ""
+  });
   const [workflowJson, setWorkflowJson] = useState(() =>
     JSON.stringify(template.workflowSchema ?? {
       statuses: workflowStatuses,
@@ -1355,7 +1464,14 @@ function TemplateCard({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setDraft({ name: template.name, type: template.type, enabled: template.enabled });
+    setDraft({
+      name: template.name,
+      type: template.type,
+      enabled: template.enabled,
+      lifecycleStatus: template.lifecycleStatus ?? "ACTIVE",
+      purposeTag: template.purposeTag ?? "",
+      successOutcome: template.successOutcome ?? ""
+    });
     setWorkflowJson(JSON.stringify(template.workflowSchema ?? {
       statuses: workflowStatuses,
       transitions: template.workflow.map((rule) => ({
@@ -1373,7 +1489,7 @@ function TemplateCard({
         }
       }))
     }, null, 2));
-  }, [template.enabled, template.name, template.type, template.workflow, template.workflowSchema, workflowStatuses]);
+  }, [template.enabled, template.name, template.type, template.workflow, template.workflowSchema, workflowStatuses, template.lifecycleStatus, template.purposeTag, template.successOutcome]);
 
   const save = async () => {
     if (!draft.name.trim()) return;
@@ -1438,6 +1554,14 @@ function TemplateCard({
         <div className="template-editor">
           <input value={draft.name} maxLength={120} onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))} />
           <Select label="유형" value={draft.type} onChange={(value) => setDraft((prev) => ({ ...prev, type: value as TemplateType }))} options={templateTypes.filter((value) => value !== "ALL").map((value) => [value, TEMPLATE_META[value].label])} />
+          <Select
+            label="라이프사이클"
+            value={draft.lifecycleStatus}
+            onChange={(value) => setDraft((prev) => ({ ...prev, lifecycleStatus: value as TemplateLifecycleStatus }))}
+            options={[["DRAFT", "Draft"], ["ACTIVE", "Active"], ["DEPRECATED", "Deprecated"], ["ARCHIVED", "Archived"]]}
+          />
+          <input value={draft.purposeTag} maxLength={80} onChange={(event) => setDraft((prev) => ({ ...prev, purposeTag: event.target.value }))} placeholder="목적 태그" />
+          <input value={draft.successOutcome} maxLength={240} onChange={(event) => setDraft((prev) => ({ ...prev, successOutcome: event.target.value }))} placeholder="성공 결과" />
           <label className="toggle-row">
             <input type="checkbox" checked={draft.enabled} onChange={(event) => setDraft((prev) => ({ ...prev, enabled: event.target.checked }))} />
             활성화
@@ -1457,11 +1581,17 @@ function TemplateCard({
         <>
           <div className="template-summary">
             <Badge tone={TEMPLATE_META[template.type].tone}>{TEMPLATE_META[template.type].label}</Badge>
+            <Badge tone={template.lifecycleStatus === "ACTIVE" ? "green" : template.lifecycleStatus === "DRAFT" ? "slate" : template.lifecycleStatus === "DEPRECATED" ? "amber" : "red"}>
+              {template.lifecycleStatus ?? "ACTIVE"}
+            </Badge>
+            {template.purposeTag ? <Badge tone="blue">{template.purposeTag}</Badge> : null}
+            {duplicateCount > 0 ? <Badge tone="amber">유사 {duplicateCount}</Badge> : null}
             <div className="row-actions left">
               <button className="text-button" disabled={busy} onClick={() => setEditing(true)}>수정</button>
               <button className="text-button danger-text" disabled={busy} onClick={() => void remove()}>삭제</button>
             </div>
           </div>
+          {template.successOutcome ? <p className="muted">{template.successOutcome}</p> : null}
           <div className="workflow-list">
             {(template.workflowSchema?.transitions ?? []).map((rule) => (
               <div key={`${rule.fromStatusId}-${rule.toStatusId}-${rule.decisionType}`}>

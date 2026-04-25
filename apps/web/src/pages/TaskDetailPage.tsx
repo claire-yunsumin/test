@@ -622,6 +622,19 @@ function SystemFieldsPanel({
   const [systemCollapsed, setSystemCollapsed] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [templateSaveModalOpen, setTemplateSaveModalOpen] = useState(false);
+  const [templateDiffModalOpen, setTemplateDiffModalOpen] = useState(false);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [recentTemplateIds, setRecentTemplateIds] = useState<string[]>(() => {
+    try {
+      const raw = window.localStorage.getItem("recent-template-ids");
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter((row): row is string => typeof row === "string");
+    } catch {
+      return [];
+    }
+  });
   const [tagInput, setTagInput] = useState("");
   const [shareOpen, setShareOpen] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -644,15 +657,25 @@ function SystemFieldsPanel({
       setError(null);
       await request(`/api/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(patch) });
       await onReload();
+      return true;
     } catch (err) {
       setError(
         err instanceof Error
           ? err.message
           : formatFailure("시스템 필드 저장 실패", "변경값이 반영되지 않았습니다", "권한과 입력값을 확인한 뒤 다시 시도하세요")
       );
+      return false;
     } finally {
       setSaving(null);
     }
+  };
+  const rememberRecentTemplate = (templateId: string | null) => {
+    if (!templateId) return;
+    setRecentTemplateIds((prev) => {
+      const next = [templateId, ...prev.filter((id) => id !== templateId)].slice(0, 6);
+      window.localStorage.setItem("recent-template-ids", JSON.stringify(next));
+      return next;
+    });
   };
   const updateMemberAccess = async (memberId: string, access: TaskAccessLevel) => {
     const nextAssignees = task.assigneeIds.filter((id) => id !== memberId);
@@ -694,6 +717,141 @@ function SystemFieldsPanel({
       setTemplateSaveBusy(false);
     }
   };
+  const pendingTemplate = useMemo(
+    () => templates.find((template) => template.id === pendingTemplateId) ?? null,
+    [pendingTemplateId, templates]
+  );
+  const templateChangePreview = useMemo(() => {
+    if (!pendingTemplate || !task.templateId || pendingTemplate.id === task.templateId) {
+      return {
+        keep: [] as string[],
+        add: [] as string[],
+        review: [] as string[],
+        statusImpact: "현재 템플릿과 동일하여 상태 변화가 없습니다.",
+        policyImpact: "정책 영향 없음"
+      };
+    }
+    const currentFieldEntries = task.template?.formDefinition ?? [];
+    const nextFieldEntries = pendingTemplate.formDefinition ?? [];
+    const currentByKey = new Map(currentFieldEntries.map((field) => [field.key, field] as const));
+    const nextByKey = new Map(nextFieldEntries.map((field) => [field.key, field] as const));
+    const currentLabels = new Map(currentFieldEntries.map((field) => [field.key, field.label] as const));
+    const nextLabels = new Map(nextFieldEntries.map((field) => [field.key, field.label] as const));
+    const currentKeys = new Set(currentFieldEntries.map((field) => field.key));
+    const nextKeys = new Set(nextFieldEntries.map((field) => field.key));
+
+    const keep = [...nextKeys]
+      .filter((key) => currentKeys.has(key))
+      .map((key) => nextLabels.get(key) ?? currentLabels.get(key) ?? key);
+    const add = [...nextKeys]
+      .filter((key) => !currentKeys.has(key))
+      .map((key) => nextLabels.get(key) ?? key);
+    const reviewPool = new Set<string>();
+    [...currentKeys].forEach((key) => {
+      if (!nextKeys.has(key)) reviewPool.add(key);
+    });
+    Object.keys(task.formValues ?? {}).forEach((key) => {
+      if (key === TASK_DESCRIPTION_FIELD_KEY) return;
+      if (!nextKeys.has(key)) reviewPool.add(key);
+    });
+    const review = [...reviewPool].map((key) => currentLabels.get(key) ?? key);
+    [...nextKeys].forEach((key) => {
+      if (!currentKeys.has(key)) return;
+      const before = currentByKey.get(key);
+      const after = nextByKey.get(key);
+      if (!before || !after) return;
+      if (before.type !== after.type) review.push(`${after.label} (타입 ${before.type} -> ${after.type})`);
+      if (Boolean(before.required) !== Boolean(after.required)) {
+        review.push(`${after.label} (${before.required ? "필수" : "선택"} -> ${after.required ? "필수" : "선택"})`);
+      }
+    });
+
+    const statusRows = pendingTemplate.workflowSchema?.statuses ?? [];
+    const currentRows = task.template?.workflowSchema?.statuses ?? [];
+    const categoryFromCurrentStatus = currentRows.find((row) => row.id === task.workflowStatusId)?.category;
+    const categoryFromState = task.currentState === "DRAFT"
+      ? "OPEN"
+      : task.currentState === "IN_PROGRESS"
+        ? "IN_PROGRESS"
+        : task.currentState === "DONE"
+          ? "DONE"
+          : "CANCELED";
+    const targetCategory = categoryFromCurrentStatus ?? categoryFromState;
+    const byCategory = statusRows.find((row) => row.category === targetCategory)?.id;
+    const byDefault = statusRows.find((row) => row.isDefault)?.id;
+    const byLegacy = statusRows.find((row) => row.id === LEGACY_STATE_TO_STATUS_ID[task.currentState])?.id;
+    const mappedStatusId = byCategory ?? byDefault ?? byLegacy ?? null;
+    const statusImpact = mappedStatusId
+      ? `예상 상태 매핑: ${targetCategory} -> ${mappedStatusId} (${byCategory ? "category" : byDefault ? "default" : "legacy"})`
+      : "예상 상태 매핑 실패 가능성: 서버 검증에서 교체가 차단될 수 있습니다.";
+
+    const transitions = pendingTemplate.workflowSchema?.transitions ?? [];
+    const gateMissingPolicy = transitions.some((row) => row.onExit?.approvalGate?.enabled && !row.onExit?.approvalGate?.policyId);
+    const policyImpact = task.approvalPolicyId
+      ? "현재 승인정책을 유지한 채 서버에서 유효성 재검증됩니다."
+      : gateMissingPolicy
+        ? "승인게이트 정책 미지정 전이가 있어 교체 후 정책 검토가 필요할 수 있습니다."
+        : "승인정책 영향 없음";
+
+    return { keep, add, review, statusImpact, policyImpact };
+  }, [pendingTemplate, task.formValues, task.template?.formDefinition, task.template?.workflowSchema?.statuses, task.templateId, task.workflowStatusId, task.currentState, task.approvalPolicyId]);
+  const closeTemplateDiffModal = () => {
+    setTemplateDiffModalOpen(false);
+    setPendingTemplateId(null);
+  };
+  const confirmTemplateChange = async () => {
+    if (!pendingTemplateId) return;
+    const ok = await patchTask("template", { templateId: pendingTemplateId });
+    if (ok) rememberRecentTemplate(pendingTemplateId);
+    closeTemplateDiffModal();
+  };
+  const requestTemplateChange = (value: string) => {
+    if (value === "__BROWSE_TEMPLATES__") {
+      go("/settings/templates");
+      return;
+    }
+    const nextTemplateId = value || null;
+    if (nextTemplateId === task.templateId) return;
+    if (task.templateId && nextTemplateId) {
+      setPendingTemplateId(nextTemplateId);
+      setTemplateDiffModalOpen(true);
+      return;
+    }
+    void (async () => {
+      const ok = await patchTask("template", { templateId: nextTemplateId });
+      if (ok) rememberRecentTemplate(nextTemplateId);
+    })();
+  };
+  const templateSelectorOptions = useMemo(() => {
+    const enabledTemplates = templates.filter((template) => {
+      const lifecycle = template.lifecycleStatus ?? "ACTIVE";
+      if (template.id === task.templateId) return true;
+      if (lifecycle === "DEPRECATED" || lifecycle === "ARCHIVED") return false;
+      return template.enabled;
+    });
+    const recentIds = recentTemplateIds.filter((id) => enabledTemplates.some((template) => template.id === id));
+    const sameTypeIds = enabledTemplates
+      .filter((template) => template.type === (task.templateType ?? "TASK"))
+      .map((template) => template.id);
+    const combined = [...recentIds, ...sameTypeIds, ...enabledTemplates.map((template) => template.id)];
+    const deduped: string[] = [];
+    combined.forEach((id) => {
+      if (!deduped.includes(id)) deduped.push(id);
+    });
+    const quickTemplates = deduped
+      .slice(0, 8)
+      .map((id) => enabledTemplates.find((template) => template.id === id))
+      .filter((template): template is Template => Boolean(template));
+    const overflowCount = Math.max(0, enabledTemplates.length - quickTemplates.length);
+    return [
+      ["", "자유폼 유지"] as [string, string],
+      ...quickTemplates.map((template) => {
+        const badge = recentIds.includes(template.id) ? "최근" : template.type === (task.templateType ?? "TASK") ? "유형일치" : "템플릿";
+        return [template.id, `${template.name} · ${badge}`] as [string, string];
+      }),
+      ...(overflowCount > 0 ? [["__BROWSE_TEMPLATES__", `템플릿 센터에서 더 보기 (${overflowCount}개)`] as [string, string]] : [])
+    ];
+  }, [templates, task.templateId, task.templateType, recentTemplateIds]);
   const addTag = async () => {
     const value = tagInput.trim();
     if (!value) return;
@@ -807,8 +965,8 @@ function SystemFieldsPanel({
             <Select
               tone="inline"
               value={task.templateId ?? ""}
-              onChange={(value) => void patchTask("template", { templateId: value || null })}
-              options={[["", "자유폼 유지"], ...templates.filter((template) => template.enabled || template.id === task.templateId).map((template) => [template.id, template.name] as [string, string])]}
+              onChange={requestTemplateChange}
+              options={templateSelectorOptions}
               disabled={!canEditTask}
             />
           </div>
@@ -1066,6 +1224,48 @@ function SystemFieldsPanel({
               <button className="button secondary" onClick={() => setTemplateSaveModalOpen(false)} disabled={templateSaveBusy}>취소</button>
               <button className="button primary" onClick={() => void saveAsTemplate()} disabled={templateSaveBusy}>
                 {templateSaveBusy ? "저장 중..." : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {templateDiffModalOpen && pendingTemplate && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Template Diff</div>
+                <h2>템플릿 교체 전 미리보기</h2>
+              </div>
+            </div>
+            <p className="muted">
+              `{task.template?.name ?? "현재 템플릿"}`에서 `{pendingTemplate.name}`로 교체합니다. 적용 전에 변경 항목을 확인하세요.
+            </p>
+            <div className="panel-box">
+              <strong>유지 ({templateChangePreview.keep.length})</strong>
+              <p className="muted">{templateChangePreview.keep.length ? templateChangePreview.keep.join(", ") : "유지되는 필드가 없습니다."}</p>
+            </div>
+            <div className="panel-box">
+              <strong>추가 ({templateChangePreview.add.length})</strong>
+              <p className="muted">{templateChangePreview.add.length ? templateChangePreview.add.join(", ") : "새로 추가되는 필드가 없습니다."}</p>
+            </div>
+            <div className="panel-box">
+              <strong>검토 필요 ({templateChangePreview.review.length})</strong>
+              <p className="muted">
+                {templateChangePreview.review.length
+                  ? `${templateChangePreview.review.join(", ")} 항목은 새 템플릿 스키마 밖 데이터이므로 값 유지 여부를 확인하세요.`
+                  : "검토가 필요한 기존 필드는 없습니다."}
+              </p>
+            </div>
+            <div className="panel-box">
+              <strong>예상 영향</strong>
+              <p className="muted">{templateChangePreview.statusImpact}</p>
+              <p className="muted">{templateChangePreview.policyImpact}</p>
+            </div>
+            <div className="row-actions">
+              <button className="button secondary" onClick={closeTemplateDiffModal} disabled={saving === "template"}>취소</button>
+              <button className="button primary" onClick={() => void confirmTemplateChange()} disabled={saving === "template"}>
+                {saving === "template" ? "적용 중..." : "교체 적용"}
               </button>
             </div>
           </div>

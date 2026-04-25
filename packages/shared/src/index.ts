@@ -1,4 +1,5 @@
 export type TemplateType = "VISION" | "AXIS" | "OBJECTIVE" | "KEYRESULT" | "TASK";
+export type TemplateLifecycleStatus = "DRAFT" | "ACTIVE" | "DEPRECATED" | "ARCHIVED";
 export type TaskState = "DRAFT" | "IN_PROGRESS" | "DONE" | "CANCELED";
 export type WorkflowPhase = "BACKLOG" | "PLAN" | "ACTIVE" | "CLOSED";
 export type WorkflowStatusCategory = "OPEN" | "IN_PROGRESS" | "PENDING_APPROVAL" | "DONE" | "CANCELED";
@@ -228,6 +229,10 @@ export type Template = {
   type: TemplateType;
   version: number;
   enabled: boolean;
+  lifecycleStatus: TemplateLifecycleStatus;
+  purposeTag?: string | null;
+  successOutcome?: string | null;
+  fingerprint?: string | null;
   formDefinition: FormFieldDefinition[];
   inspectionCriteria: string[];
   workflow: Array<{
@@ -451,6 +456,9 @@ export function createSeedData(): AppData {
       type: "OBJECTIVE",
       version: 1,
       enabled: true,
+      lifecycleStatus: "ACTIVE",
+      purposeTag: "go-to-market",
+      successOutcome: "시장 포지셔닝 의사결정 구조화",
       formDefinition: [
         { key: "problemDefinition", label: "M1. 문제정의", type: "LONG_TEXT", required: true, helpText: "누가 어떤 의사결정을 해야 하는지 적습니다." },
         { key: "marketAnalysis", label: "M2. 시장 분석", type: "LONG_TEXT", required: true, helpText: "ICP, Champion, 경쟁환경, White Space를 포함합니다." },
@@ -477,6 +485,9 @@ export function createSeedData(): AppData {
       type: "KEYRESULT",
       version: 1,
       enabled: true,
+      lifecycleStatus: "ACTIVE",
+      purposeTag: "release-readiness",
+      successOutcome: "출시 기준과 품질 게이트 명확화",
       formDefinition: [
         { key: "releaseSpec", label: "Release Spec", type: "LONG_TEXT", required: true },
         { key: "qualityGate", label: "품질 기준", type: "LONG_TEXT", required: true },
@@ -501,6 +512,9 @@ export function createSeedData(): AppData {
       type: "TASK",
       version: 2,
       enabled: true,
+      lifecycleStatus: "ACTIVE",
+      purposeTag: "execution",
+      successOutcome: "실행 산출물/블로커 표준화",
       formDefinition: [
         { key: "deliverable", label: "산출물", type: "TEXT", required: true },
         { key: "blocker", label: "블로커", type: "TEXT", required: false }

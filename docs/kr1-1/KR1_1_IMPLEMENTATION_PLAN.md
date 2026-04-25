@@ -78,3 +78,13 @@
 
 검증 메모:
 - API 테스트: `npm run test -w apps/api` 통과 (35 passed / 0 failed)
+
+## 후속 실행백로그 (AI Ready / Scale)
+
+| 우선순위 | 항목 | 상태 | 대상 파일 | 완료 기준 |
+| --- | --- | --- | --- | --- |
+| P0 | 템플릿 교체 전 diff 미리보기 고도화 | 완료 | `apps/web/src/pages/TaskDetailPage.tsx` | 유지/추가/검토 + 상태/정책 예상 영향 표시 후 확인 적용 |
+| P1 | 템플릿 과밀 노출 제어(셀렉터/센터) | 완료 | `apps/web/src/pages/TaskDetailPage.tsx`, `apps/web/src/pages/settings/SettingsPages.tsx` | 셀렉터 상위 노출 제한 + 센터 검색/필터/페이지네이션 |
+| P2 | 템플릿 수명주기 상태모델 도입 | 완료 | `packages/shared/src/index.ts`, `apps/api/src/server.ts`, `apps/web/src/pages/settings/SettingsPages.tsx` | `Draft/Active/Deprecated/Archived` 필드 추가, 템플릿 센터 필터/편집 반영, 셀렉터에서 Deprecated/Archived 기본 제외 |
+| P3 | 템플릿 중복 감지(fingerprint) | 완료 | `apps/api/src/server.ts`, `apps/api/src/domain/store.ts`, `apps/web/src/pages/settings/SettingsPages.tsx` | fingerprint 생성, 생성/수정 시 유사 후보 반환, 템플릿 센터 유사 배지 노출 |
+| P4 | AI 추천 1단계(추천-only) | 대기 | `apps/api/src/server.ts`, `apps/web/src/pages/TaskDetailPage.tsx`, `apps/web/src/pages/settings/SettingsPages.tsx` | Top-1+대안 추천, 이유 설명, 수락/거절 로그 수집 |
