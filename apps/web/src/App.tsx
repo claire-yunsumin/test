@@ -115,7 +115,16 @@ export function App() {
       {route.path.startsWith("/tasks/") && route.taskId ? (
         <TaskWorkspace taskId={route.taskId} me={data.me} templates={data.templates} onReload={reload} />
       ) : route.path === "/tasks" ? (
-        <TasksView tasks={tasksByContext} members={data.members} buckets={data.buckets} me={data.me} selectedUnitId={selectedUnitId} selectedListId={selectedListId} onReload={reload} />
+        <TasksView
+          tasks={tasksByContext}
+          members={data.members}
+          folders={data.folders}
+          lists={data.lists}
+          me={data.me}
+          selectedUnitId={selectedUnitId}
+          selectedListId={selectedListId}
+          onReload={reload}
+        />
       ) : route.path === "/graph" ? (
         <DecisionGraphView data={{ ...data, tasks: tasksByContext }} />
       ) : route.path === "/inbox" ? (

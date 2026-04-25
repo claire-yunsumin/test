@@ -107,7 +107,6 @@ export type Task = {
   workflowPhase?: WorkflowPhase;
   phaseOverride?: WorkflowPhase | null;
   workflowStatusId?: string;
-  bucketId?: string | null;
   priority: Priority;
   ownerId: string;
   assigneeIds: string[];
@@ -170,14 +169,6 @@ export type TaskList = {
   folderId: string | null;
   name: string;
   defaultPhase?: WorkflowPhase;
-};
-
-export type Bucket = {
-  id: string;
-  unitId: string | null;
-  listId: string | null;
-  name: string;
-  order: number;
 };
 
 export type WorkflowStatusDefinition = {
@@ -322,7 +313,6 @@ export type AppData = {
   unitMembers: UnitMember[];
   folders: Folder[];
   lists: TaskList[];
-  buckets: Bucket[];
   tasks: Task[];
   attachments: TaskAttachment[];
   notes: Note[];
@@ -400,7 +390,6 @@ const makeTask = (task: Omit<Task, "tags"> & Partial<Pick<Task, "tags">>): Task 
   workflowStatusId: task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState],
   workflowPhase: task.workflowPhase ?? legacyStateToPhase(task.currentState),
   phaseOverride: task.phaseOverride ?? null,
-  bucketId: task.bucketId ?? null,
   tags: task.tags ?? [],
   attachmentIds: task.attachmentIds ?? []
 });
@@ -421,11 +410,6 @@ export function createSeedData(): AppData {
     { id: "list-growth-validation", unitId: "unit-growth", folderId: "folder-growth-exec", name: "Validation 리스트", defaultPhase: "ACTIVE" },
     { id: "list-product-phase", unitId: "unit-product", folderId: "folder-product-roadmap", name: "Phase 리스트", defaultPhase: "PLAN" },
     { id: "list-ops-backlog", unitId: "unit-ops", folderId: null, name: "운영 백로그", defaultPhase: "BACKLOG" }
-  ];
-  const buckets: Bucket[] = [
-    { id: "bucket-priority", unitId: null, listId: null, name: "우선 처리", order: 0 },
-    { id: "bucket-bugfix", unitId: null, listId: null, name: "버그 수정", order: 1 },
-    { id: "bucket-idea", unitId: null, listId: null, name: "아이디어", order: 2 }
   ];
   const members: Member[] = [
     { id: "u-pm", name: "박PM", email: "pm@selvasin4.local", role: "MEMBER", unit: "HWE" },
@@ -1072,7 +1056,6 @@ export function createSeedData(): AppData {
     unitMembers,
     folders,
     lists,
-    buckets,
     tasks,
     attachments,
     notes,

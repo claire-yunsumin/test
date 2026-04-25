@@ -35,7 +35,7 @@ docs/
 
 - `packages/shared`는 도메인 언어의 기준입니다. `Task`, `Template`, `Mention`, `ApprovalPolicy`, `Analytics`, workflow enum이 여기서 시작됩니다.
 - `apps/api`는 신뢰 경계입니다. 프론트에서 버튼을 숨기더라도 서버는 인증, 역할, 가시성, 입력 검증을 반드시 수행합니다.
-- `apps/web`은 운영 화면과 상호작용을 담당합니다. `layout/Shell`의 GNB·Explorer(유닛/폴더/리스트), 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 버킷/백로그/보드 조작이 이곳에 있습니다.
+- `apps/web`은 운영 화면과 상호작용을 담당합니다. `layout/Shell`의 GNB·Explorer(유닛/폴더/리스트), 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 백로그/보드 조작이 이곳에 있습니다.
 - `docs`는 코드의 현재 상태를 설명하는 기준 문서입니다. enum, API, 역할 정책이 바뀌면 함께 갱신해야 합니다.
 
 ## 현재 제품 모델

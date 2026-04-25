@@ -10,7 +10,6 @@ Objective 1/KR 1.1의 "형상화 -> 정형화 -> 멘션" 루프를 태스크 운
 - `FREEFORM`/`TEMPLATED` 구조 상태
 - 템플릿 적용과 Form Output 활성화
 - unit/folder/list 무결성
-- 버킷 운영 축
 - 리스트/보드/백로그/결정 그래프 뷰 탭
 
 ## 시스템 요구사항
@@ -19,8 +18,7 @@ Objective 1/KR 1.1의 "형상화 -> 정형화 -> 멘션" 루프를 태스크 운
 2. FREEFORM 태스크는 템플릿 없이 생성/수정/parent 연결이 가능해야 합니다.
 3. 템플릿 적용 시 `structureState=TEMPLATED`가 되고 `formValues`가 필드 키 기준으로 초기화됩니다.
 4. `unitId`, `folderId`, `listId` 조합은 생성/수정 시 항상 검증합니다.
-5. 버킷은 `/api/buckets`와 `Task.bucketId`로 관리하며 상태 전이와 분리합니다.
-6. 계층과 결정 그래프는 별도 메뉴가 아니라 태스크 뷰 탭으로 제공됩니다.
+5. 계층과 결정 그래프는 별도 메뉴가 아니라 태스크 뷰 탭으로 제공됩니다.
 
 ## 수용 기준
 

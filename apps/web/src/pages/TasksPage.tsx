@@ -27,7 +27,8 @@ import {
   type Unit,
   type UnitMember,
   type UnitMemberRole,
-  type Bucket
+  type Folder,
+  type TaskList
 } from "@hwe/shared";
 import { Badge, Centered, FilterShell, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "../components/ui";
 import { request } from "../lib/api";
@@ -65,7 +66,25 @@ import {
   type TaskViewMode
 } from "../lib/domain";
 
-export function TasksView({ tasks, members, buckets, me, selectedUnitId, selectedListId, onReload }: { tasks: TaskView[]; members: Member[]; buckets: Bucket[]; me: Member; selectedUnitId: string; selectedListId: string; onReload: () => Promise<void> }) {
+export function TasksView({
+  tasks,
+  members,
+  folders,
+  lists,
+  me,
+  selectedUnitId,
+  selectedListId,
+  onReload
+}: {
+  tasks: TaskView[];
+  members: Member[];
+  folders: Folder[];
+  lists: TaskList[];
+  me: Member;
+  selectedUnitId: string;
+  selectedListId: string;
+  onReload: () => Promise<void>;
+}) {
   const BACKLOG_WIP_LIMIT = 8;
   const searchParams = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialViewMode = searchParams.get("view");
@@ -92,8 +111,8 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
   const [viewMode, setViewMode] = useState<TaskViewMode>(() =>
     initialViewMode === "board" || initialViewMode === "backlog" || initialViewMode === "graph" ? initialViewMode : "list"
   );
-  const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee" | "bucket">(() =>
-    initialGroupBy === "state" || initialGroupBy === "assignee" || initialGroupBy === "bucket" ? initialGroupBy : "none"
+  const [groupBy, setGroupBy] = useState<"none" | "state" | "assignee" | "folder" | "list">(() =>
+    initialGroupBy === "state" || initialGroupBy === "assignee" || initialGroupBy === "folder" || initialGroupBy === "list" ? initialGroupBy : "none"
   );
   const [quickFilter, setQuickFilter] = useState<"all" | "mine" | "pending" | "due-today">(() =>
     initialQuickFilter === "mine" || initialQuickFilter === "pending" || initialQuickFilter === "due-today" ? initialQuickFilter : "all"
@@ -111,12 +130,6 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
     succeeded: Array<{ id: string; title: string }>;
     failed: Array<{ id: string; title: string; reason: string }>;
   } | null>(null);
-  const [newBucketName, setNewBucketName] = useState("");
-  const [bucketBusy, setBucketBusy] = useState(false);
-  const [draggingBucketTaskId, setDraggingBucketTaskId] = useState<string | null>(null);
-  const [bucketEditingId, setBucketEditingId] = useState("");
-  const [bucketEditName, setBucketEditName] = useState("");
-  const [activeDropBucketId, setActiveDropBucketId] = useState<string | null>(null);
   const meId = me.id;
 
   useEffect(() => {
@@ -189,49 +202,8 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
   const dragDisabled = sortBy !== "manual" || groupBy !== "none";
   const backlogTasks = filteredTasks.filter((task) => isBacklogTask(task));
 
-  const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => {
+  const patchTask = async (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "templateId">>) => {
     await request(`/api/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(patch) });
-    await onReload();
-  };
-  const createBucket = async () => {
-    if (!newBucketName.trim()) return;
-    try {
-      setBucketBusy(true);
-      await request("/api/buckets", {
-        method: "POST",
-        body: JSON.stringify({
-          name: newBucketName.trim(),
-          unitId: selectedUnitId || null,
-          listId: selectedListId || null
-        })
-      });
-      setNewBucketName("");
-      await onReload();
-    } finally {
-      setBucketBusy(false);
-    }
-  };
-  const reorderBucket = async (bucketId: string, direction: -1 | 1) => {
-    const ordered = [...buckets].sort((a, b) => a.order - b.order);
-    const index = ordered.findIndex((row) => row.id === bucketId);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= ordered.length) return;
-    const current = ordered[index];
-    const target = ordered[nextIndex];
-    await request(`/api/buckets/${current.id}`, { method: "PATCH", body: JSON.stringify({ order: target.order }) });
-    await request(`/api/buckets/${target.id}`, { method: "PATCH", body: JSON.stringify({ order: current.order }) });
-    await onReload();
-  };
-  const deleteBucket = async (bucketId: string) => {
-    if (!window.confirm("버킷을 삭제할까요? 연결된 태스크는 버킷 없음으로 이동합니다.")) return;
-    await request(`/api/buckets/${bucketId}`, { method: "DELETE" });
-    await onReload();
-  };
-  const renameBucket = async (bucketId: string) => {
-    if (!bucketEditName.trim()) return;
-    await request(`/api/buckets/${bucketId}`, { method: "PATCH", body: JSON.stringify({ name: bucketEditName.trim() }) });
-    setBucketEditingId("");
-    setBucketEditName("");
     await onReload();
   };
   const moveTaskParent = async (taskId: string, nextParentId: string | null) => {
@@ -383,7 +355,13 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
             <Select label="상태" tone="filter" value={filterState} onChange={(v) => setFilterState(v as typeof filterState)} options={states.map((v) => [v, v === "ALL" ? "전체 상태" : STATE_META[v].label])} />
             <Select label="유형" tone="filter" value={filterType} onChange={(v) => setFilterType(v as typeof filterType)} options={templateTypes.map((v) => [v, v === "ALL" ? "전체 유형" : TEMPLATE_META[v].label])} />
             <Select label="정렬" tone="filter" value={sortBy} onChange={setSortBy} options={[["manual", "수동 순서"], ["updated", "최근 수정순"], ["due", "기한순"], ["priority", "우선순위순"]]} />
-            <Select label="그룹" tone="filter" value={groupBy} onChange={(value) => setGroupBy(value as typeof groupBy)} options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"], ["bucket", "버킷별"]]} />
+            <Select
+              label="그룹"
+              tone="filter"
+              value={groupBy}
+              onChange={(value) => setGroupBy(value as typeof groupBy)}
+              options={[["none", "그룹 없음"], ["state", "상태별"], ["assignee", "담당자별"], ["folder", "폴더별"], ["list", "리스트별"]]}
+            />
           </FilterShell>
         </div>
       )}
@@ -416,7 +394,6 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
               tasks={backlogTasks}
               allTasks={filteredTasks}
               members={members}
-              buckets={buckets}
               dragDisabled={dragDisabled}
               showSprintAction
               onQuickCreate={async (quickTitle) => {
@@ -446,108 +423,74 @@ export function TasksView({ tasks, members, buckets, me, selectedUnitId, selecte
       ) : groupBy === "state" ? (
         <div className="grouped-list">
           {states.filter((state): state is TaskState => state !== "ALL").map((state) => (
-            <TaskListPanel key={state} title={STATE_META[state].label} tasks={filteredTasks.filter((task) => task.currentState === state)} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={patchTask} />
+            <TaskListPanel key={state} title={STATE_META[state].label} tasks={filteredTasks.filter((task) => task.currentState === state)} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
           ))}
         </div>
       ) : groupBy === "assignee" ? (
         <div className="grouped-list">
           {members.map((member) => (
-            <TaskListPanel key={member.id} title={member.name} tasks={filteredTasks.filter((task) => task.assigneeIds.includes(member.id))} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={patchTask} />
+            <TaskListPanel key={member.id} title={member.name} tasks={filteredTasks.filter((task) => task.assigneeIds.includes(member.id))} members={members} dragDisabled={dragDisabled} onPatch={patchTask} />
           ))}
         </div>
-      ) : groupBy === "bucket" ? (
+      ) : groupBy === "folder" ? (
         <div className="grouped-list">
-          <section className="task-list-panel">
-            <div className="task-list-head">
-              <strong>버킷 관리</strong>
-            </div>
-            <div className="template-save-row">
-              <input value={newBucketName} onChange={(event) => setNewBucketName(event.target.value)} placeholder="새 버킷 이름" />
-              <button className="button secondary" onClick={() => void createBucket()} disabled={bucketBusy || !newBucketName.trim()}>
-                {bucketBusy ? "생성 중..." : "+ 버킷 추가"}
-              </button>
-            </div>
-          </section>
-          {[...buckets].sort((a, b) => a.order - b.order).map((bucket) => (
-            <div
-              key={bucket.id}
-              className={`bucket-drop-zone ${activeDropBucketId === bucket.id ? "active" : ""}`}
-              onDragOver={(event) => {
-                if (!draggingBucketTaskId) return;
-                event.preventDefault();
-                setActiveDropBucketId(bucket.id);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (draggingBucketTaskId) void patchTask(draggingBucketTaskId, { bucketId: bucket.id });
-                setDraggingBucketTaskId(null);
-                setActiveDropBucketId(null);
-              }}
-              onDragLeave={() => setActiveDropBucketId((prev) => (prev === bucket.id ? null : prev))}
-            >
-              <TaskListPanel
-                title={bucketEditingId === bucket.id ? "버킷 이름 수정" : bucket.name}
-                tasks={filteredTasks.filter((task) => task.bucketId === bucket.id)}
-                members={members}
-                buckets={buckets}
-                dragDisabled={dragDisabled}
-                onPatch={patchTask}
-                showBucketSelect
-                bucketControls={(
-                  <div className="row-actions">
-                    {bucketEditingId === bucket.id ? (
-                      <>
-                        <input value={bucketEditName} onChange={(event) => setBucketEditName(event.target.value)} placeholder="버킷 이름" />
-                        <button className="button secondary" onClick={() => void renameBucket(bucket.id)}>저장</button>
-                        <button className="button secondary" onClick={() => { setBucketEditingId(""); setBucketEditName(""); }}>취소</button>
-                      </>
-                    ) : (
-                      <button className="button secondary" onClick={() => { setBucketEditingId(bucket.id); setBucketEditName(bucket.name); }}>이름수정</button>
-                    )}
-                    <button className="button secondary" onClick={() => void reorderBucket(bucket.id, -1)}>↑</button>
-                    <button className="button secondary" onClick={() => void reorderBucket(bucket.id, 1)}>↓</button>
-                    <button className="button danger" onClick={() => void deleteBucket(bucket.id)}>삭제</button>
-                  </div>
-                )}
-                onRowDragStart={setDraggingBucketTaskId}
-                onRowDragEnd={() => setDraggingBucketTaskId(null)}
-              />
-            </div>
-          ))}
-          <div
-            className={`bucket-drop-zone ${activeDropBucketId === "__none__" ? "active" : ""}`}
-            onDragOver={(event) => {
-              if (!draggingBucketTaskId) return;
-              event.preventDefault();
-              setActiveDropBucketId("__none__");
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              if (draggingBucketTaskId) void patchTask(draggingBucketTaskId, { bucketId: null });
-              setDraggingBucketTaskId(null);
-              setActiveDropBucketId(null);
-            }}
-            onDragLeave={() => setActiveDropBucketId((prev) => (prev === "__none__" ? null : prev))}
-          >
-            <TaskListPanel
-              title="버킷 없음"
-              tasks={filteredTasks.filter((task) => !task.bucketId)}
-              members={members}
-              buckets={buckets}
-              dragDisabled={dragDisabled}
-              onPatch={patchTask}
-              showBucketSelect
-              onRowDragStart={setDraggingBucketTaskId}
-              onRowDragEnd={() => { setDraggingBucketTaskId(null); setActiveDropBucketId(null); }}
-            />
-          </div>
+          {(() => {
+            const visibleFolders = selectedUnitId ? folders.filter((folder) => folder.unitId === selectedUnitId) : folders;
+            return (
+              <>
+                {visibleFolders.map((folder) => (
+                  <TaskListPanel
+                    key={folder.id}
+                    title={folder.name}
+                    tasks={filteredTasks.filter((task) => task.folderId === folder.id)}
+                    members={members}
+                    dragDisabled={dragDisabled}
+                    onPatch={patchTask}
+                  />
+                ))}
+                <TaskListPanel
+                  title="폴더 없음"
+                  tasks={filteredTasks.filter((task) => !task.folderId)}
+                  members={members}
+                  dragDisabled={dragDisabled}
+                  onPatch={patchTask}
+                />
+              </>
+            );
+          })()}
+        </div>
+      ) : groupBy === "list" ? (
+        <div className="grouped-list">
+          {(() => {
+            const visibleLists = selectedUnitId ? lists.filter((list) => list.unitId === selectedUnitId) : lists;
+            return (
+              <>
+                {visibleLists.map((list) => (
+                  <TaskListPanel
+                    key={list.id}
+                    title={list.name}
+                    tasks={filteredTasks.filter((task) => task.listId === list.id)}
+                    members={members}
+                    dragDisabled={dragDisabled}
+                    onPatch={patchTask}
+                  />
+                ))}
+                <TaskListPanel
+                  title="리스트 없음"
+                  tasks={filteredTasks.filter((task) => !task.listId)}
+                  members={members}
+                  dragDisabled={dragDisabled}
+                  onPatch={patchTask}
+                />
+              </>
+            );
+          })()}
         </div>
       ) : (
         <TaskTreeListView
           tasks={filteredTasks}
           allTasks={tasks}
           members={members}
-          buckets={buckets}
           dragDisabled={dragDisabled}
           onQuickCreate={async (quickTitle) => {
             const payload: Record<string, unknown> = { title: quickTitle, templateType: "TASK" };
@@ -617,7 +560,6 @@ function TaskTreeListView({
   tasks,
   allTasks,
   members,
-  buckets,
   dragDisabled,
   onQuickCreate,
   onPatch,
@@ -628,10 +570,9 @@ function TaskTreeListView({
   tasks: TaskView[];
   allTasks: TaskView[];
   members: Member[];
-  buckets: Bucket[];
   dragDisabled: boolean;
   onQuickCreate: (title: string) => Promise<void>;
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => Promise<void>;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "templateId">>) => Promise<void>;
   onMoveParent: (taskId: string, nextParentId: string | null) => Promise<void>;
   showSprintAction?: boolean;
   showQuickAdd?: boolean;
@@ -731,7 +672,7 @@ function TaskTreeListView({
           <span>Priority</span>
         </div>
         {(byParent.get(null) ?? []).map((task) => (
-          <TaskTreeRow key={task.id} task={task} level={0} byParent={byParent} expanded={expanded} onToggle={toggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={moveByDrop} showSprintAction={showSprintAction} />
+          <TaskTreeRow key={task.id} task={task} level={0} byParent={byParent} expanded={expanded} onToggle={toggle} members={members} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={moveByDrop} showSprintAction={showSprintAction} />
         ))}
         {!tasks.length && <div className="empty-row">표시할 태스크가 없습니다.</div>}
       </div>
@@ -775,7 +716,6 @@ function TaskTreeRow({
   expanded,
   onToggle,
   members,
-  buckets,
   dragDisabled,
   onPatch,
   focusedTaskId,
@@ -793,9 +733,8 @@ function TaskTreeRow({
   expanded: Set<string>;
   onToggle: (id: string) => void;
   members: Member[];
-  buckets: Bucket[];
   dragDisabled: boolean;
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId" | "templateId">>) => Promise<void>;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "templateId">>) => Promise<void>;
   focusedTaskId: string | null;
   setFocusedTaskId: (id: string) => void;
   draggingTaskId: string | null;
@@ -807,7 +746,6 @@ function TaskTreeRow({
 }) {
   const children = byParent.get(task.id) ?? [];
   const open = expanded.has(task.id);
-  const bucketName = buckets.find((bucket) => bucket.id === task.bucketId)?.name ?? "버킷 없음";
   return (
     <>
       <div
@@ -848,7 +786,6 @@ function TaskTreeRow({
           <div className="tree-inline-actions">
             {showSprintAction && <button className="workflow-chip-btn sprint" onClick={() => void onPatch(task.id, { currentState: "IN_PROGRESS", workflowPhase: "ACTIVE" })}>투입</button>}
             <button className="workflow-chip-btn backlog" onClick={() => void onPatch(task.id, { currentState: "DRAFT", workflowPhase: "BACKLOG" })}>백로그</button>
-            <span className="signal-chip">{bucketName}</span>
           </div>
         </div>
         <span className="owner-cell">
@@ -868,7 +805,7 @@ function TaskTreeRow({
         <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
       </div>
       {open && children.map((child) => (
-        <TaskTreeRow key={child.id} task={child} level={level + 1} byParent={byParent} expanded={expanded} onToggle={onToggle} members={members} buckets={buckets} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={onDropParent} showSprintAction={showSprintAction} />
+        <TaskTreeRow key={child.id} task={child} level={level + 1} byParent={byParent} expanded={expanded} onToggle={onToggle} members={members} dragDisabled={dragDisabled} onPatch={onPatch} focusedTaskId={focusedTaskId} setFocusedTaskId={setFocusedTaskId} draggingTaskId={draggingTaskId} dropTargetTaskId={dropTargetTaskId} setDraggingTaskId={setDraggingTaskId} setDropTargetTaskId={setDropTargetTaskId} onDropParent={onDropParent} showSprintAction={showSprintAction} />
       ))}
     </>
   );
@@ -878,7 +815,6 @@ function TaskListPanel({
   title,
   tasks,
   members,
-  buckets,
   dragDisabled,
   quickMove,
   onQuickMove,
@@ -887,15 +823,12 @@ function TaskListPanel({
   onToggleSelect,
   onSelectAll,
   onPatch,
-  showBucketSelect = false,
-  bucketControls,
   onRowDragStart,
   onRowDragEnd
 }: {
   title: string;
   tasks: TaskView[];
   members: Member[];
-  buckets: Bucket[];
   dragDisabled: boolean;
   quickMove?: { label: string; toState: TaskState };
   onQuickMove?: (task: TaskView) => void;
@@ -903,9 +836,7 @@ function TaskListPanel({
   selectedTaskIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
   onSelectAll?: () => void;
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => Promise<void>;
-  showBucketSelect?: boolean;
-  bucketControls?: ReactNode;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId">>) => Promise<void>;
   onRowDragStart?: (taskId: string) => void;
   onRowDragEnd?: () => void;
 }) {
@@ -918,7 +849,6 @@ function TaskListPanel({
         {selectable && onSelectAll && (
           <button className="text-button" onClick={onSelectAll}>전체 선택</button>
         )}
-        {bucketControls}
       </div>
       <div className="task-table">
         <div className="task-row rich-row table-head">
@@ -973,16 +903,6 @@ function TaskListPanel({
               ) : (
                 <span className="muted">-</span>
               )}
-              {showBucketSelect ? (
-                <Select
-                  tone="inline"
-                  value={task.bucketId ?? ""}
-                  onChange={(value) => void onPatch(task.id, { bucketId: value || null })}
-                  options={[["", "버킷 없음"], ...buckets.map((bucket) => [bucket.id, bucket.name] as [string, string])]}
-                />
-              ) : (
-                <span className="signal-chip">{buckets.find((bucket) => bucket.id === task.bucketId)?.name ?? "버킷 없음"}</span>
-              )}
             </div>
             <Select tone="inline" value={task.currentState} onChange={(value) => void onPatch(task.id, { currentState: value as TaskState })} options={states.filter((state): state is TaskState => state !== "ALL").map((state) => [state, STATE_META[state].label])} />
             <Select tone="inline" value={task.priority} onChange={(value) => void onPatch(task.id, { priority: value as TaskView["priority"] })} options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])} />
@@ -1001,7 +921,7 @@ function TaskBoardView({
 }: {
   tasks: TaskView[];
   members: Member[];
-  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId" | "bucketId">>) => Promise<void>;
+  onPatch: (taskId: string, patch: Partial<Pick<TaskView, "currentState" | "priority" | "parentId" | "workflowPhase" | "phaseOverride" | "workflowStatusId">>) => Promise<void>;
 }) {
   return (
     <div className="board-view">

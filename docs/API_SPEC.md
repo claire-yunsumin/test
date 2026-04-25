@@ -39,15 +39,6 @@ Unit 삭제는 하위 folder/list/task/unitMember가 없어야 가능합니다.
 
 List는 `unitId`, `folderId`, `defaultPhase`를 가질 수 있습니다.
 
-## Bucket
-
-- `GET /api/buckets?unitId=...&listId=...`
-- `POST /api/buckets`
-- `PATCH /api/buckets/:bucketId`
-- `DELETE /api/buckets/:bucketId`
-
-Bucket 삭제 시 연결된 태스크의 `bucketId`는 `null`로 정리됩니다.
-
 ## Task
 
 - `GET /api/hierarchy?search=&type=&state=&assignee=`
@@ -70,7 +61,6 @@ Bucket 삭제 시 연결된 태스크의 `bucketId`는 `null`로 정리됩니다
   "currentState": "DRAFT",
   "workflowPhase": "BACKLOG",
   "workflowStatusId": "open",
-  "bucketId": null,
   "approvalPolicyId": null,
   "unitId": "unit-growth",
   "folderId": "folder-growth-planning",
@@ -94,8 +84,7 @@ Bucket 삭제 시 연결된 태스크의 `bucketId`는 `null`로 정리됩니다
   "assigneeIds": ["u-pm"],
   "watcherIds": ["u-lead"],
   "dueDate": "2026-05-10",
-  "formValues": { "deliverable": "결과물" },
-  "bucketId": "bucket-priority"
+  "formValues": { "deliverable": "결과물" }
 }
 ```
 

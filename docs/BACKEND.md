@@ -47,7 +47,7 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 
 - Workspace: `Unit`, `Folder`, `TaskList`
 - Work Graph: `Task.parentId`, `structureState`, `templateId`
-- 실행 분류: `bucketId`, `workflowPhase`, `phaseOverride`, `workflowStatusId`
+- 실행 분류: `workflowPhase`, `phaseOverride`, `workflowStatusId`
 - 협업: `Note`, `ThreadComment`, `Mention`
 - 기록: `TimelineEvent`, `InboxItem`, `EngagementEvent`
 - 정책: `Template`, `ApprovalPolicy`, `NotificationSettings`, `WebPushSubscription`

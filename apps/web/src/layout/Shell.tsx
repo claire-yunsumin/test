@@ -93,6 +93,15 @@ export function Shell({
   const [creatingFolderUnitId, setCreatingFolderUnitId] = useState<string | null>(null);
   const [creatingListUnitId, setCreatingListUnitId] = useState<string | null>(null);
   const [openUnitMenuId, setOpenUnitMenuId] = useState<string | null>(null);
+  const [explorerNotice, setExplorerNotice] = useState<string>("");
+  const [recentFolderId, setRecentFolderId] = useState<string | null>(null);
+  const [recentListId, setRecentListId] = useState<string | null>(null);
+  const [menuDraft, setMenuDraft] = useState<{
+    unitId: string;
+    mode: "folder" | "list";
+    name: string;
+    folderId: string;
+  } | null>(null);
   const [gnbExpanded, setGnbExpanded] = useState(() => {
     try {
       return window.localStorage.getItem(GNB_EXPANDED_KEY) === "1";
@@ -154,12 +163,29 @@ export function Shell({
   useEffect(() => {
     if (!openUnitMenuId) return;
     const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (!target?.closest(".unit-row-actions")) setOpenUnitMenuId(null);
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setOpenUnitMenuId(null);
+        return;
+      }
+      if (!target.closest(".unit-row-actions")) setOpenUnitMenuId(null);
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [openUnitMenuId]);
+  useEffect(() => {
+    if (!explorerNotice) return;
+    const timer = window.setTimeout(() => setExplorerNotice(""), 2400);
+    return () => window.clearTimeout(timer);
+  }, [explorerNotice]);
+  useEffect(() => {
+    if (!recentFolderId && !recentListId) return;
+    const timer = window.setTimeout(() => {
+      setRecentFolderId(null);
+      setRecentListId(null);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [recentFolderId, recentListId]);
   const toggleTeam = (unitId: string) => {
     setOpenTeamIds((prev) => {
       const next = new Set(prev);
@@ -247,19 +273,21 @@ export function Shell({
   const activeFolder = activeList ? folders.find((folder) => folder.id === activeList.folderId) : null;
   const templatedCount = tasks.filter((task) => task.structureState === "TEMPLATED").length;
   const mentionReadyCount = tasks.filter((task) => task.activity.commentsCount > 0 || task.activity.notesCount > 0).length;
-  const createFolder = async (unit: Unit) => {
+  const createFolder = async (unit: Unit, name: string) => {
     if (creatingFolderUnitId) return;
-    const rawName = window.prompt(`${unit.name}에 추가할 폴더 이름을 입력하세요.`);
-    const name = rawName?.trim();
-    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
     try {
       setCreatingFolderUnitId(unit.id);
-      await request("/api/folders", {
+      const created = await request<Folder>("/api/folders", {
         method: "POST",
-        body: JSON.stringify({ unitId: unit.id, name })
+        body: JSON.stringify({ unitId: unit.id, name: trimmed })
       });
       setOpenTeamIds((prev) => new Set(prev).add(unit.id));
       await onReload();
+      setRecentFolderId(created.id);
+      setRecentListId(null);
+      setExplorerNotice(`폴더 "${created.name}"를 만들었습니다.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "폴더를 생성하지 못했습니다.";
       window.alert(message);
@@ -267,34 +295,23 @@ export function Shell({
       setCreatingFolderUnitId(null);
     }
   };
-  const createList = async (unit: Unit) => {
+  const createList = async (unit: Unit, name: string, folderId: string | null) => {
     if (creatingListUnitId) return;
-    const rawName = window.prompt(`${unit.name}에 추가할 리스트 이름을 입력하세요.`);
-    const name = rawName?.trim();
-    if (!name) return;
-    const unitFolders = folders.filter((folder) => folder.unitId === unit.id);
-    let folderId: string | null = null;
-    if (unitFolders.length > 0) {
-      const folderHint = unitFolders.map((folder) => folder.name).join(", ");
-      const rawFolderName = window.prompt(`폴더에 넣으려면 폴더명을 입력하세요. (없으면 빈값)\n가능: ${folderHint}`);
-      const folderName = rawFolderName?.trim();
-      if (folderName) {
-        const matched = unitFolders.find((folder) => folder.name === folderName);
-        if (!matched) {
-          window.alert("입력한 폴더명을 찾을 수 없습니다. 다시 시도해 주세요.");
-          return;
-        }
-        folderId = matched.id;
-      }
-    }
+    const trimmed = name.trim();
+    if (!trimmed) return;
     try {
       setCreatingListUnitId(unit.id);
-      await request("/api/lists", {
+      const created = await request<TaskList>("/api/lists", {
         method: "POST",
-        body: JSON.stringify({ unitId: unit.id, folderId, name, defaultPhase: "BACKLOG" })
+        body: JSON.stringify({ unitId: unit.id, folderId, name: trimmed, defaultPhase: "BACKLOG" })
       });
       setOpenTeamIds((prev) => new Set(prev).add(unit.id));
       await onReload();
+      onSelectUnit(unit.id);
+      onSelectList(created.id);
+      setRecentListId(created.id);
+      setRecentFolderId(created.folderId ?? null);
+      setExplorerNotice(`리스트 "${created.name}"를 만들었습니다.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "리스트를 생성하지 못했습니다.";
       window.alert(message);
@@ -302,7 +319,10 @@ export function Shell({
       setCreatingListUnitId(null);
     }
   };
-  const closeUnitMenu = () => setOpenUnitMenuId(null);
+  const closeUnitMenu = () => {
+    setOpenUnitMenuId(null);
+    setMenuDraft(null);
+  };
 
   return (
     <div className={`app-shell ${gnbExpanded ? "gnb-expanded" : ""}`}>
@@ -357,17 +377,8 @@ export function Shell({
         </button>
       </aside>
       <aside className="context-sidebar explorer-sidebar">
-        <section className="context-card context-current teams-current">
-          <small>{workspaceScopeLabel}</small>
-          <div className="current-team-row">
-            <span className="team-avatar">{teamInitials(workspaceUnitTitle)}</span>
-            <span>
-              <strong>{activeList?.name ?? workspaceUnitTitle}</strong>
-              <em>{activeFolder ? `${workspaceUnitTitle} / ${activeFolder.name}` : unitRoleLabel}</em>
-            </span>
-          </div>
-        </section>
         <section className="context-section favorites-section">
+          {explorerNotice && <div className="explorer-notice">{explorerNotice}</div>}
           <div className="context-section-head">
             <span>Favorites</span>
             <b>{favoriteItems.length}</b>
@@ -451,7 +462,11 @@ export function Shell({
                         title="유닛 작업"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setOpenUnitMenuId((prev) => (prev === unit.id ? null : unit.id));
+                          setOpenUnitMenuId((prev) => {
+                            const next = prev === unit.id ? null : unit.id;
+                            if (next !== unit.id) setMenuDraft(null);
+                            return next;
+                          });
                         }}
                       >
                         ...
@@ -462,7 +477,10 @@ export function Shell({
                             type="button"
                             role="menuitem"
                             onClick={() => {
-                              toggleFavorite(`unit:${unit.id}`);
+                              const key = `unit:${unit.id}`;
+                              const alreadyFavorite = favoriteKeys.has(key);
+                              toggleFavorite(key);
+                              setExplorerNotice(alreadyFavorite ? "즐겨찾기를 해제했습니다." : "즐겨찾기에 추가했습니다.");
                               closeUnitMenu();
                             }}
                           >
@@ -472,23 +490,33 @@ export function Shell({
                             type="button"
                             role="menuitem"
                             disabled={creatingFolderUnitId === unit.id}
-                            onClick={async () => {
-                              await createFolder(unit);
-                              closeUnitMenu();
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setMenuDraft({
+                                unitId: unit.id,
+                                mode: "folder",
+                                name: "",
+                                folderId: ""
+                              });
                             }}
                           >
-                            폴더 추가
+                            폴더 만들기
                           </button>
                           <button
                             type="button"
                             role="menuitem"
                             disabled={creatingListUnitId === unit.id}
-                            onClick={async () => {
-                              await createList(unit);
-                              closeUnitMenu();
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setMenuDraft({
+                                unitId: unit.id,
+                                mode: "list",
+                                name: "",
+                                folderId: ""
+                              });
                             }}
                           >
-                            리스트 추가
+                            리스트 만들기
                           </button>
                           <button
                             type="button"
@@ -500,6 +528,59 @@ export function Shell({
                           >
                             {isOpen ? "유닛 접기" : "유닛 펼치기"}
                           </button>
+                          {menuDraft?.unitId === unit.id && menuDraft.mode === "folder" && (
+                            <div className="team-actions-form">
+                              <input
+                                value={menuDraft.name}
+                                onChange={(event) => setMenuDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                                placeholder="폴더 이름"
+                              />
+                              <div className="team-actions-form-buttons">
+                                <button
+                                  type="button"
+                                  disabled={!menuDraft.name.trim() || creatingFolderUnitId === unit.id}
+                                  onClick={async () => {
+                                    await createFolder(unit, menuDraft.name);
+                                    closeUnitMenu();
+                                  }}
+                                >
+                                  생성
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {menuDraft?.unitId === unit.id && menuDraft.mode === "list" && (
+                            <div className="team-actions-form">
+                              <input
+                                value={menuDraft.name}
+                                onChange={(event) => setMenuDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))}
+                                placeholder="리스트 이름"
+                              />
+                              <select
+                                value={menuDraft.folderId}
+                                onChange={(event) => setMenuDraft((prev) => (prev ? { ...prev, folderId: event.target.value } : prev))}
+                              >
+                                <option value="">폴더 없음</option>
+                                {folders.filter((folder) => folder.unitId === unit.id).map((folder) => (
+                                  <option key={folder.id} value={folder.id}>
+                                    {folder.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <div className="team-actions-form-buttons">
+                                <button
+                                  type="button"
+                                  disabled={!menuDraft.name.trim() || creatingListUnitId === unit.id}
+                                  onClick={async () => {
+                                    await createList(unit, menuDraft.name, menuDraft.folderId || null);
+                                    closeUnitMenu();
+                                  }}
+                                >
+                                  생성
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </span>
@@ -509,11 +590,11 @@ export function Shell({
                       {unitFolders.map((folder) => {
                         const folderLists = unitLists.filter((list) => list.folderId === folder.id);
                         return (
-                          <div className="channel-group folder-group" key={folder.id}>
+                          <div className={`channel-group folder-group ${recentFolderId === folder.id ? "recent" : ""}`} key={folder.id}>
                             {folderLists.map((list) => {
                               const listUnread = unreadByList.get(list.id) ?? 0;
                               return (
-                                <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""}`} onClick={() => onSelectList(list.id)}>
+                                <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""} ${recentListId === list.id ? "recent" : ""}`} onClick={() => onSelectList(list.id)}>
                                   <WorkspaceListScopeIcon title={list.name} />
                                   <span className="channel-copy">
                                     <strong>{list.name}</strong>
@@ -538,7 +619,7 @@ export function Shell({
                       {unitLists.filter((list) => !list.folderId).map((list) => {
                         const listUnread = unreadByList.get(list.id) ?? 0;
                         return (
-                          <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""}`} onClick={() => onSelectList(list.id)}>
+                          <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""} ${recentListId === list.id ? "recent" : ""}`} onClick={() => onSelectList(list.id)}>
                             <WorkspaceListScopeIcon title={list.name} />
                             <span className="channel-copy">
                               <strong>{list.name}</strong>

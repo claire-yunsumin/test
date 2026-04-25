@@ -63,7 +63,7 @@ flowchart LR
   A --> C[보드]
   A --> D[백로그]
   A --> E[결정 그래프]
-  B --> F[필터/정렬/그룹/버킷]
+  B --> F[필터/정렬/그룹(폴더·리스트)]
   C --> G[상태별 이동]
   D --> H[스프린트 투입/WIP]
   E --> I[parent/note/decision edges]

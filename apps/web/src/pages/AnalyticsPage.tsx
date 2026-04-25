@@ -26,8 +26,7 @@ import {
   type TimelineEvent,
   type Unit,
   type UnitMember,
-  type UnitMemberRole,
-  type Bucket
+  type UnitMemberRole
 } from "@hwe/shared";
 import { Badge, Centered, FilterShell, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "../components/ui";
 import { request } from "../lib/api";

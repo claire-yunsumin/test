@@ -47,7 +47,7 @@ docs/
 
 - `TASK_LIFECYCLE.md`: 태스크 생성, 형상화/정형화, 배치, 협업, 전이, 삭제
 - `TEMPLATE_LIFECYCLE.md`: Template 생성/수정, 태스크 적용, Form Output 초기화, workflow 전이
-- `WORKSPACE_LIFECYCLE.md`: Unit, Folder, List, Bucket, Task 배치와 무결성 검증
+- `WORKSPACE_LIFECYCLE.md`: Unit, Folder, List, Task 배치와 무결성 검증
 - `COMMENT_MENTION_LIFECYCLE.md`: 스레드 댓글, `@`/`#` 커맨드, 멘션/노트 참조 검증, 파생 이벤트
 - `TIMELINE_LIFECYCLE.md`: 타임라인 이벤트 생성, 저장 구조, 상세 우측 탭 표현
 - `INBOX_LIFECYCLE.md`: Inbox 생성, 분류, 수신자 계산, 읽음/확인/리마인드 처리
@@ -61,7 +61,6 @@ docs/
 - `APPROVAL_POLICY_SPEC.md`: 승인정책 모델, 승인 라인, 전이 연동, 승인자 계산 우선순위
 - `NOTIFICATION_POLICY_SPEC.md`: 알림 설정, Push subscription, Inbox 읽음/확인/리마인드 운영 정책
 - `ADMIN_OPERATIONS_GUIDE.md`: 멤버/초대/권한 변경, 자기 자신 삭제/강등 방지, 관리자 위험 작업 기준
-- `BUCKET_GUIDE.md`: 버킷의 역할, API, 뷰별 표시, 운영 주의사항
 
 ## 비즈니스 룰 문서
 
@@ -70,14 +69,14 @@ docs/
 - `business-rules/SYSTEM_SPEC.md`: 비즈니스 룰을 시스템 요구사항과 영향 영역으로 매핑
 - `business-rules/system-spec/RELEASE_1_SPEC.md`: 인증, 권한, 기본 CRUD, 가시성
 - `business-rules/system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
-- `business-rules/system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 버킷, 템플릿
+- `business-rules/system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 템플릿
 - `business-rules/system-spec/RELEASE_4_SPEC.md`: 승인 정책, 알림, 분석, 운영 관리
 
 ## 현재 구현 핵심
 
 - 인증은 `X-Demo-User-Id` 헤더 기반입니다.
 - 역할은 `MEMBER < OWNER < ADMIN < SUPER_ADMIN` 순서입니다.
-- 태스크는 `unitId`, `folderId`, `listId`, `bucketId`, `parentId` 맥락을 가집니다.
+- 태스크는 `unitId`, `folderId`, `listId`, `parentId` 맥락을 가집니다.
 - 좌측 `Shell`의 Explorer는 Unit·Folder·List를 트리로 보여 주며(팀/채널 UI는 **IA 참고**), List 행에 채널의 `#` 표기는 쓰지 않습니다(스레드의 `#` 노트 커맨드와 구분).
 - Work Graph는 `FREEFORM` 형상화와 `TEMPLATED` 정형화를 구분합니다.
 - Template은 `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema`를 가집니다.

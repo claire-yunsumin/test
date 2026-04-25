@@ -377,62 +377,6 @@ app.get("/api/lists", (req, res) => {
   res.json(rows);
 });
 
-app.get("/api/buckets", (req, res) => {
-  const unitId = String(req.query.unitId ?? "");
-  const listId = String(req.query.listId ?? "");
-  const rows = data.buckets
-    .filter((bucket) => !unitId || bucket.unitId === null || bucket.unitId === unitId)
-    .filter((bucket) => !listId || bucket.listId === null || bucket.listId === listId)
-    .sort((a, b) => a.order - b.order);
-  res.json(rows);
-});
-
-app.post("/api/buckets", (req, res) => {
-  if (!requireRole(req, res, "MEMBER")) return;
-  const body = z.object({
-    name: text(1, 40),
-    unitId: z.string().nullable().optional(),
-    listId: z.string().nullable().optional()
-  }).parse(req.body);
-  if (body.unitId && !byId(data.units, body.unitId)) {
-    return res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
-  }
-  if (body.listId && !byId(data.lists, body.listId)) {
-    return res.status(400).json({ error: "INVALID_LIST", requestId: req.requestId });
-  }
-  const bucket = {
-    id: `bucket-${crypto.randomUUID()}`,
-    name: body.name.trim(),
-    unitId: body.unitId ?? null,
-    listId: body.listId ?? null,
-    order: data.buckets.length
-  };
-  data.buckets.push(bucket);
-  res.status(201).json(bucket);
-});
-
-app.patch("/api/buckets/:bucketId", (req, res) => {
-  if (!requireRole(req, res, "MEMBER")) return;
-  const bucket = byId(data.buckets, req.params.bucketId);
-  if (!bucket) return res.status(404).json({ error: "BUCKET_NOT_FOUND", requestId: req.requestId });
-  const body = z.object({
-    name: optionalText(40),
-    order: z.number().int().min(0).max(10000).optional()
-  }).parse(req.body);
-  if (body.name !== undefined) bucket.name = body.name.trim();
-  if (body.order !== undefined) bucket.order = body.order;
-  res.json(bucket);
-});
-
-app.delete("/api/buckets/:bucketId", (req, res) => {
-  if (!requireRole(req, res, "MEMBER")) return;
-  const bucket = byId(data.buckets, req.params.bucketId);
-  if (!bucket) return res.status(404).json({ error: "BUCKET_NOT_FOUND", requestId: req.requestId });
-  data.buckets = data.buckets.filter((row) => row.id !== bucket.id);
-  data.tasks = data.tasks.map((task) => (task.bucketId === bucket.id ? { ...task, bucketId: null } : task));
-  res.json({ ok: true, bucketId: bucket.id });
-});
-
 app.post("/api/lists", (req, res) => {
   if (!requireRole(req, res, "MEMBER")) return;
   const body = z.object({
@@ -493,7 +437,6 @@ app.post("/api/tasks", (req, res) => {
       phaseOverride: z.enum(["BACKLOG", "PLAN", "ACTIVE", "CLOSED"]).nullable().optional(),
       workflowStatusId: z.string().optional(),
       tags: z.array(text(1, 30)).max(20).optional(),
-      bucketId: z.string().nullable().optional(),
       approvalPolicyId: z.string().nullable().optional(),
       unitId: z.string().optional(),
       folderId: z.string().nullable().optional(),
@@ -511,11 +454,6 @@ app.post("/api/tasks", (req, res) => {
     res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
     return;
   }
-  if (body.bucketId !== undefined && body.bucketId !== null && !byId(data.buckets, body.bucketId)) {
-    res.status(400).json({ error: "INVALID_BUCKET", requestId: req.requestId });
-    return;
-  }
-
   const unitId = body.unitId ?? data.units[0]?.id;
   if (!unitId || !byId(data.units, unitId)) {
     res.status(400).json({ error: "INVALID_UNIT", requestId: req.requestId });
@@ -570,7 +508,6 @@ app.post("/api/tasks", (req, res) => {
     ,
     tags: body.tags ?? []
     ,
-    bucketId: body.bucketId ?? null,
     attachmentIds: []
   };
 
@@ -635,7 +572,6 @@ app.patch("/api/tasks/:taskId", (req, res) => {
       dueDate: z.string().nullable().optional(),
       formValues: z.record(text(0, 1000)).optional(),
       tags: z.array(text(1, 30)).max(20).optional(),
-      bucketId: z.string().nullable().optional(),
       approvalPolicyId: z.string().nullable().optional(),
       unitId: z.string().optional(),
       folderId: z.string().nullable().optional(),
@@ -661,10 +597,6 @@ app.patch("/api/tasks/:taskId", (req, res) => {
   }
   if (patch.approvalPolicyId !== undefined && patch.approvalPolicyId !== null && !data.approvalPolicies.some((row) => row.id === patch.approvalPolicyId && row.enabled)) {
     res.status(400).json({ error: "INVALID_APPROVAL_POLICY", requestId: req.requestId });
-    return;
-  }
-  if (patch.bucketId !== undefined && patch.bucketId !== null && !byId(data.buckets, patch.bucketId)) {
-    res.status(400).json({ error: "INVALID_BUCKET", requestId: req.requestId });
     return;
   }
   if (patch.unitId && !byId(data.units, patch.unitId)) {

@@ -537,18 +537,11 @@ describe("admin CRUD smoke path", () => {
     assert.equal(workflowStatuses.response.status, 200);
     assert.equal(workflowStatuses.body.length, 3);
 
-    const bucket = await api("/api/buckets", {
-      method: "POST",
-      body: JSON.stringify({ name: "버그", unitId: "unit-growth" })
-    });
-    assert.equal(bucket.response.status, 201);
-
     const createdTask = await api("/api/tasks", {
       method: "POST",
-      body: JSON.stringify({ title: "Automated CRUD task", templateType: "TASK", bucketId: bucket.body.id })
+      body: JSON.stringify({ title: "Automated CRUD task", templateType: "TASK" })
     });
     assert.equal(createdTask.response.status, 201);
-    assert.equal(createdTask.body.bucketId, bucket.body.id);
 
     const updatedTask = await api(`/api/tasks/${createdTask.body.id}`, {
       method: "PATCH",
@@ -619,9 +612,6 @@ describe("admin CRUD smoke path", () => {
 
     const deletedUnit = await api(`/api/units/${createdUnit.body.id}`, { method: "DELETE" });
     assert.equal(deletedUnit.response.status, 200);
-
-    const bucketDelete = await api(`/api/buckets/${bucket.body.id}`, { method: "DELETE" });
-    assert.equal(bucketDelete.response.status, 200);
 
     const templateDelete = await api(`/api/templates/${template.body.id}`, { method: "DELETE" });
     assert.equal(templateDelete.response.status, 200);

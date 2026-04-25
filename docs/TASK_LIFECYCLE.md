@@ -16,7 +16,7 @@
 
 - `MEMBER` 이상 역할 확인
 - `unitId`, `folderId`, `listId` 정합성 검증
-- `bucketId`, `templateId`, `approvalPolicyId` 유효성 검증
+- `templateId`, `approvalPolicyId` 유효성 검증
 - Task 저장
 - `TASK_CREATED` 타임라인 생성
 - `NODE_CREATED` engagement 생성
@@ -35,7 +35,6 @@
 - `unitId`: 업무 단위
 - `folderId`: 유닛 안의 폴더
 - `listId`: 리스트
-- `bucketId`: 우선 처리/버그 수정/아이디어 같은 실행 묶음
 - `parentId`: Work Graph 계층
 - `workflowPhase`: `BACKLOG`, `PLAN`, `ACTIVE`, `CLOSED`
 - `phaseOverride`: UI에서 명시적으로 phase를 바꿀 때 사용

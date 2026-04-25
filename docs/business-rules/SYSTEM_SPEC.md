@@ -7,7 +7,7 @@
 - `DOMAIN_GLOSSARY.md`: 핵심 도메인 용어 정의
 - `system-spec/RELEASE_1_SPEC.md`: 인증, 권한, 기본 CRUD, 가시성
 - `system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
-- `system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 버킷, 템플릿
+- `system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 템플릿
 - `system-spec/RELEASE_4_SPEC.md`: 승인 정책, 알림, 분석, 운영 관리
 
 ## 1. 인증/인가
@@ -103,19 +103,17 @@
 - 우측 타임라인 탭
 - 승인/반려/보완 UX
 
-## 7. 뷰와 버킷
+## 7. 뷰와 그룹
 
 시스템 요구사항:
 
 - 태스크 화면은 리스트, 보드, 백로그, 결정 그래프 뷰를 제공합니다.
 - 기존 계층 화면과 결정 그래프는 별도 1차 메뉴가 아니라 태스크 뷰 탭으로 제공합니다.
-- 버킷은 `/api/buckets`와 `Task.bucketId`로 관리합니다.
-- 버킷 삭제는 태스크를 삭제하지 않고 버킷 연결만 해제합니다.
+- 뷰의 그룹은 상태/담당자/폴더/리스트 기준으로 동작합니다.
 
 영향 영역:
 
 - `/tasks?view=list|board|backlog|graph`
-- 버킷 관리 UI
 - 결정 그래프 표시 레이어
 
 ## 8. 알림과 Inbox
