@@ -35,7 +35,6 @@ import type { TaskDetail, TaskView } from "../lib/viewTypes";
 import { TaskViewTabs } from "../features/tasks/TaskViewTabs";
 import {
   TASK_DESCRIPTION_FIELD_KEY,
-  TASK_FILES_FIELD_KEY,
   buildTaskBreadcrumb,
   decisionActions,
   decisionHint,
@@ -430,14 +429,13 @@ function SystemFieldsPanel({
   const saveAsTemplate = async () => {
     const nextName = templateSaveName.trim() || `${task.title} 템플릿`;
     const fields: Array<{ key: string; label: string; type: FormFieldType; required: boolean }> = Object.entries(task.formValues ?? {})
-      .filter(([key]) => key !== TASK_DESCRIPTION_FIELD_KEY && key !== TASK_FILES_FIELD_KEY)
+      .filter(([key]) => key !== TASK_DESCRIPTION_FIELD_KEY)
       .map(([key]) => ({
         key,
         label: key.replace(/[_-]+/g, " ").replace(/\b\w/g, (ch) => ch.toUpperCase()),
         type: "TEXT",
         required: false
       }));
-    fields.unshift({ key: TASK_FILES_FIELD_KEY, label: "파일 업로드", type: "FILE", required: false });
     try {
       setTemplateSaveBusy(true);
       setError(null);
@@ -1300,11 +1298,12 @@ function MentionComposer({
 }
 
 function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditForm: boolean; onReload: () => Promise<void> }) {
-  const fields = task.template?.formDefinition ?? [];
+  const fields = (task.template?.formDefinition ?? []).filter((field) => field.type !== "FILE");
   const entries = [
     [TASK_DESCRIPTION_FIELD_KEY, task.description ?? ""] as [string, string],
-    [TASK_FILES_FIELD_KEY, task.formValues[TASK_FILES_FIELD_KEY] ?? ""] as [string, string],
-    ...(fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues).filter(([key]) => key !== TASK_FILES_FIELD_KEY))
+    ...(fields.length
+      ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string])
+      : Object.entries(task.formValues))
   ];
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => entries.length ? entries : [["", ""]]);
@@ -1313,8 +1312,9 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
   useEffect(() => {
     const nextEntries = [
       [TASK_DESCRIPTION_FIELD_KEY, task.description ?? ""] as [string, string],
-      [TASK_FILES_FIELD_KEY, task.formValues[TASK_FILES_FIELD_KEY] ?? ""] as [string, string],
-      ...(fields.length ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string]) : Object.entries(task.formValues).filter(([key]) => key !== TASK_FILES_FIELD_KEY))
+      ...(fields.length
+        ? fields.map((field) => [field.key, task.formValues[field.key] ?? ""] as [string, string])
+        : Object.entries(task.formValues))
     ];
     setRows(nextEntries.length ? nextEntries : [["", ""]]);
   }, [task.description, task.formValues, task.templateId]);
@@ -1367,30 +1367,12 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
             <div className="form-output-row" key={`${key}-${index}`}>
               <input
                 value={key}
-                placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : key === TASK_FILES_FIELD_KEY ? "파일 업로드" : field?.label ?? "필드"}
+                placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : field?.label ?? "필드"}
                 maxLength={80}
-                readOnly={Boolean(field) || key === TASK_DESCRIPTION_FIELD_KEY || key === TASK_FILES_FIELD_KEY}
+                readOnly={Boolean(field) || key === TASK_DESCRIPTION_FIELD_KEY}
                 onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}
               />
-              {field?.type === "FILE" || key === TASK_FILES_FIELD_KEY ? (
-                <input
-                  type="file"
-                  multiple
-                  onChange={(event) => {
-                    const files = Array.from(event.target.files ?? []).map((file) => file.name);
-                    if (!files.length) return;
-                    setRows((prev) => prev.map((row, rowIndex) => {
-                      if (rowIndex !== index) return row;
-                      const existing = row[1]
-                        .split(",")
-                        .map((part) => part.trim())
-                        .filter(Boolean);
-                      const next = [...new Set([...existing, ...files])];
-                      return [row[0], next.join(", ")];
-                    }));
-                  }}
-                />
-              ) : field?.type === "LONG_TEXT" || key === TASK_DESCRIPTION_FIELD_KEY ? (
+              {field?.type === "LONG_TEXT" || key === TASK_DESCRIPTION_FIELD_KEY ? (
                 <textarea
                   value={value}
                   placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "핵심 맥락과 배경을 구조적으로 작성하세요" : field?.helpText ?? "값"}
@@ -1407,7 +1389,7 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
                   onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
                 />
               )}
-              {!field && key !== TASK_DESCRIPTION_FIELD_KEY && key !== TASK_FILES_FIELD_KEY && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
+              {!field && key !== TASK_DESCRIPTION_FIELD_KEY && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
             </div>
           );
           })}
@@ -1421,9 +1403,9 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
         <div className="kv-grid">
           {entries.length ? entries.map(([key, value]) => (
             <div key={key}>
-              <small>{key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : key === TASK_FILES_FIELD_KEY ? "파일 업로드" : fields.find((field) => field.key === key)?.label ?? key}</small>
+              <small>{key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : fields.find((field) => field.key === key)?.label ?? key}</small>
               <strong className={key === TASK_DESCRIPTION_FIELD_KEY ? "rich-text-preview" : undefined}>
-                {key === TASK_FILES_FIELD_KEY ? (value ? value.split(",").map((row) => row.trim()).filter(Boolean).join(" · ") : "파일 없음") : value}
+                {value}
               </strong>
             </div>
           )) : <p className="muted">입력된 양식 값이 없습니다</p>}

@@ -2863,7 +2863,6 @@ main {
 .rich-row {
   grid-template-columns: 40px minmax(320px, 1.65fr) minmax(150px, 0.75fr) minmax(120px, 0.5fr) minmax(110px, 0.46fr) minmax(145px, 0.6fr) minmax(125px, 0.5fr);
   min-height: 40px;
-  border-left: 3px solid transparent;
 }
 
 .table-head {
@@ -2878,11 +2877,6 @@ main {
 .table-head:hover {
   box-shadow: none;
 }
-
-.priority-urgent { border-left-color: var(--red); }
-.priority-high { border-left-color: #f97316; }
-.priority-medium { border-left-color: var(--amber); }
-.priority-low { border-left-color: var(--green); }
 
 .task-open-cell {
   display: grid;
@@ -4125,18 +4119,7 @@ main {
 
 .task-row.rich-row:not(.table-head):hover {
   background: #f8fbff;
-  border-left-color: var(--blue);
 }
-
-
-.board-card {
-  box-shadow: inset 3px 0 0 transparent;
-}
-
-.board-card.priority-urgent { box-shadow: inset 3px 0 0 var(--red); }
-.board-card.priority-high { box-shadow: inset 3px 0 0 #f97316; }
-.board-card.priority-medium { box-shadow: inset 3px 0 0 var(--amber); }
-.board-card.priority-low { box-shadow: inset 3px 0 0 var(--green); }
 
 @media (max-width: 1120px) {
   .market-tape {

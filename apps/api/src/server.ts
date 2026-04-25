@@ -22,6 +22,7 @@ import { addEngagement, addInbox, addTimeline, applyTemplate, byId, calculateAna
 
 const port = Number(process.env.PORT ?? 4000);
 const templateTypes = ["VISION", "AXIS", "OBJECTIVE", "KEYRESULT", "TASK"] as const;
+const LEGACY_TASK_FILES_FIELD_KEY = "__task_files";
 const mentionSchema = z.object({
   type: z.enum(["MEMBER", "TASK", "FORM_FIELD", "NOTE"]),
   targetId: z.string(),
@@ -74,6 +75,18 @@ function phaseFromState(state: TaskState): WorkflowPhase {
   if (state === "DRAFT") return "BACKLOG";
   if (state === "DONE" || state === "CANCELED") return "CLOSED";
   return "ACTIVE";
+}
+
+function sanitizeLegacyFormValues(values: Record<string, string> | undefined) {
+  if (!values) return values;
+  const next = { ...values };
+  delete next[LEGACY_TASK_FILES_FIELD_KEY];
+  return next;
+}
+
+function sanitizeLegacyFormDefinition<T extends { key: string; type: string }>(fields: T[] | undefined) {
+  if (!fields) return fields;
+  return fields.filter((field) => field.type !== "FILE" && field.key !== LEGACY_TASK_FILES_FIELD_KEY);
 }
 
 function statusesForTemplate(template: Template | null) {
@@ -672,6 +685,9 @@ app.patch("/api/tasks/:taskId", (req, res) => {
   } else if (patch.currentState !== undefined) {
     task.workflowStatusId = LEGACY_STATE_TO_STATUS_ID[patch.currentState];
   }
+  if (patch.formValues !== undefined) {
+    patch.formValues = sanitizeLegacyFormValues(patch.formValues) ?? {};
+  }
   if (patch.workflowPhase !== undefined) task.workflowPhase = patch.workflowPhase;
   if (patch.phaseOverride !== undefined) task.phaseOverride = patch.phaseOverride;
   const assignablePatch = { ...patch };
@@ -1268,13 +1284,14 @@ app.post("/api/templates", (req, res) => {
     })).max(20).default([]),
     inspectionCriteria: z.array(z.string().min(1).max(240)).max(20).default([])
   }).parse(req.body);
+  const sanitizedFormDefinition = sanitizeLegacyFormDefinition(body.formDefinition) ?? [];
   const template: Template = {
     id: `tpl-${crypto.randomUUID()}`,
     name: body.name,
     type: body.type,
     version: 1,
     enabled: body.enabled,
-    formDefinition: body.formDefinition,
+    formDefinition: sanitizedFormDefinition,
     inspectionCriteria: body.inspectionCriteria,
     workflow: [
       { from: "DRAFT", to: "IN_PROGRESS", label: "시작", isDecision: false, decisionType: "STATE_ONLY" },
@@ -1303,6 +1320,9 @@ app.patch("/api/templates/:templateId", (req, res) => {
     })).max(20).optional(),
     inspectionCriteria: z.array(z.string().min(1).max(240)).max(20).optional()
   }).parse(req.body);
+  if (body.formDefinition !== undefined) {
+    body.formDefinition = sanitizeLegacyFormDefinition(body.formDefinition);
+  }
   Object.assign(template, body);
   template.version += 1;
   res.json(template);

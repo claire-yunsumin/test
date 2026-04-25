@@ -6,13 +6,38 @@ import {
   type EngagementEventType,
   type InboxComponent,
   type Task,
+  type FormFieldDefinition,
   type TimelineEvent
 } from "@hwe/shared";
 
-export let data: AppData = createSeedData();
+const LEGACY_TASK_FILES_FIELD_KEY = "__task_files";
+
+function stripLegacyFileFieldFromFormValues(values: Record<string, string>) {
+  const next = { ...values };
+  delete next[LEGACY_TASK_FILES_FIELD_KEY];
+  return next;
+}
+
+function stripLegacyFileFieldsFromDefinition(fields: FormFieldDefinition[]) {
+  return fields.filter((field) => field.type !== "FILE" && field.key !== LEGACY_TASK_FILES_FIELD_KEY);
+}
+
+function normalizeLegacyFileFields(source: AppData): AppData {
+  source.tasks = source.tasks.map((task) => ({
+    ...task,
+    formValues: stripLegacyFileFieldFromFormValues(task.formValues)
+  }));
+  source.templates = source.templates.map((template) => ({
+    ...template,
+    formDefinition: stripLegacyFileFieldsFromDefinition(template.formDefinition)
+  }));
+  return source;
+}
+
+export let data: AppData = normalizeLegacyFileFields(createSeedData());
 
 export function resetData() {
-  data = createSeedData();
+  data = normalizeLegacyFileFields(createSeedData());
 }
 
 export const byId = <T extends { id: string }>(rows: T[], id: string) => rows.find((row) => row.id === id);
@@ -74,8 +99,9 @@ export function componentForEvent(type: string): InboxComponent {
 export function applyTemplate(task: Task, templateId: string) {
   const template = byId(data.templates, templateId);
   if (!template || !template.enabled) return null;
-  const nextValues = { ...task.formValues };
-  template.formDefinition.forEach((field) => {
+  const nextValues = stripLegacyFileFieldFromFormValues(task.formValues);
+  const normalizedDefinition = stripLegacyFileFieldsFromDefinition(template.formDefinition);
+  normalizedDefinition.forEach((field) => {
     nextValues[field.key] = nextValues[field.key] ?? "";
   });
   task.templateId = template.id;

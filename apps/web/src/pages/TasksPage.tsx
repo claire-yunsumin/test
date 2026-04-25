@@ -365,7 +365,7 @@ export function TasksView({
           </FilterShell>
         </div>
       )}
-      {viewMode !== "list" && (
+      {viewMode === "board" && (
         <form className="create-card" onSubmit={create}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="새 태스크 제목" />
           <Select label="유형" value={templateType} onChange={(v) => setTemplateType(v as TemplateType)} options={templateTypes.filter((v) => v !== "ALL").map((v) => [v, TEMPLATE_META[v].label])} />
@@ -385,30 +385,23 @@ export function TasksView({
       ) : viewMode === "backlog" ? (
         <div className="grouped-list">
           {bulkFeedback && <div className="inline-error">{bulkFeedback}</div>}
-            <section className="task-list-panel">
-            <div className="task-list-head">
-              <strong>백로그</strong>
-              <span>{backlogTasks.length}</span>
-            </div>
-            <TaskTreeListView
-              tasks={backlogTasks}
-              allTasks={filteredTasks}
-              members={members}
-              dragDisabled={dragDisabled}
-              showSprintAction
-              onQuickCreate={async (quickTitle) => {
-                const payload: Record<string, unknown> = { title: quickTitle, templateType: "TASK", currentState: "DRAFT", workflowPhase: "BACKLOG" };
-                if (selectedUnitId) payload.unitId = selectedUnitId;
-                if (selectedListId) payload.listId = selectedListId;
-                const task = await request<TaskView>("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
-                await onReload();
-                go(`/tasks/${task.id}`);
-              }}
-              onPatch={patchTask}
-              onMoveParent={moveTaskParent}
-              showQuickAdd={false}
-            />
-          </section>
+          <TaskTreeListView
+            tasks={backlogTasks}
+            allTasks={filteredTasks}
+            members={members}
+            dragDisabled={dragDisabled}
+            showSprintAction
+            onQuickCreate={async (quickTitle) => {
+              const payload: Record<string, unknown> = { title: quickTitle, templateType: "TASK", currentState: "DRAFT", workflowPhase: "BACKLOG" };
+              if (selectedUnitId) payload.unitId = selectedUnitId;
+              if (selectedListId) payload.listId = selectedListId;
+              const task = await request<TaskView>("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
+              await onReload();
+              go(`/tasks/${task.id}`);
+            }}
+            onPatch={patchTask}
+            onMoveParent={moveTaskParent}
+          />
           {selectedTaskIds.size > 0 && (
             <div className="bulk-action-bar">
               <strong>{selectedTaskIds.size}개 선택됨</strong>
@@ -749,7 +742,7 @@ function TaskTreeRow({
   return (
     <>
       <div
-        className={`task-row rich-row priority-${task.priority.toLowerCase()} ${dropTargetTaskId === task.id ? "drop-target" : ""}`}
+        className={`task-row rich-row ${dropTargetTaskId === task.id ? "drop-target" : ""}`}
         onDragOver={(event) => {
           if (!draggingTaskId) return;
           event.preventDefault();
@@ -861,7 +854,7 @@ function TaskListPanel({
           <span>Priority</span>
         </div>
         {tasks.map((task) => (
-          <div key={task.id} className={`task-row rich-row priority-${task.priority.toLowerCase()}`}>
+          <div key={task.id} className="task-row rich-row">
             <div className="row-left-actions">
               {selectable && onToggleSelect && (
                 <label className="row-select-check">
@@ -935,7 +928,7 @@ function TaskBoardView({
             </div>
             <div className="board-card-stack">
               {rows.map((task) => (
-                <article className={`board-card priority-${task.priority.toLowerCase()}`} key={task.id}>
+                <article className="board-card" key={task.id}>
                   <button className="board-card-title" onClick={() => go(`/tasks/${task.id}`)}>{task.title}</button>
                   <div className="board-card-meta">
                     <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
