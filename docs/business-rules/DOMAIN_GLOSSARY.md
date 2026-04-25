@@ -29,6 +29,10 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 
 사용자가 볼 수 있는 리소스 범위입니다. 관리자는 전체 태스크를 볼 수 있고, 일반 사용자는 owner/assignee/watcher 관계와 parent chain 기준으로 볼 수 있습니다.
 
+### Editability
+
+사용자가 보이는 리소스를 실제로 수정할 수 있는지의 범위입니다. 태스크 필드 수정은 관리자, task owner, task assignee, 해당 unit owner에게 허용됩니다. watcher 또는 parent chain으로만 보이는 사용자는 read-only입니다.
+
 ## Workspace 구조
 
 ### Unit
@@ -62,6 +66,8 @@ Work Graph의 기본 노드입니다. `unitId`, `folderId`, `listId`, `parentId`
 ### Parent Chain
 
 특정 태스크에서 상위 태스크로 이어지는 `parentId` 경로입니다. 일반 사용자의 가시성 계산에도 포함됩니다.
+
+Parent chain은 Work Graph cycle을 만들 수 없습니다. parent 변경 시 자기 자신 또는 descendant를 parent로 지정하는 요청은 차단됩니다.
 
 ### Structure State
 

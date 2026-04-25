@@ -17,6 +17,13 @@
 
 권한 판단은 서버에서 수행합니다. 프론트의 버튼 숨김, 비활성화, 안내 문구는 사용성 보조 장치입니다.
 
+태스크 조회 가능성과 수정 가능성은 분리됩니다.
+
+- 조회 가능: 관리자 전체, 또는 owner/assignee/watcher 관계와 parent chain
+- 태스크 필드 수정 가능: 관리자, task owner, task assignee, 해당 unit owner
+- Form/description 수정 가능: 관리자, task owner, task assignee
+- watcher 또는 parent chain으로만 보이는 사용자는 read-only입니다.
+
 ## 2. 가시성
 
 관리자(`ADMIN`, `SUPER_ADMIN`)는 전체 태스크를 볼 수 있습니다.
@@ -43,6 +50,12 @@
 - `folderId`는 해당 `unitId`에 속해야 합니다.
 - `folderId`와 `listId`는 같은 컨텍스트여야 합니다.
 - 조합이 맞지 않으면 `FOLDER_LIST_MISMATCH`로 거부합니다.
+
+Work Graph의 parent 관계는 cycle을 만들 수 없습니다.
+
+- 자기 자신을 parent로 지정할 수 없습니다.
+- 자신의 descendant를 parent로 지정할 수 없습니다.
+- parent chain 순회는 이미 방문한 노드를 만나면 중단합니다.
 
 ## 4. 뷰와 운영 축
 
@@ -116,6 +129,8 @@
 - `RESULT`
 
 사용자는 Inbox 항목을 읽음, 확인, 리마인드 처리할 수 있습니다. 알림 설정은 이메일/푸시/데스크톱 채널 및 컴포넌트별 토글을 가집니다.
+
+`read-all`은 관리자여도 현재 사용자 본인의 Inbox만 읽음 처리합니다.
 
 ## 10. 분석과 추적
 

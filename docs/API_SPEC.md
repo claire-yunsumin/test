@@ -49,6 +49,16 @@ List는 `unitId`, `folderId`, `defaultPhase`를 가질 수 있습니다.
 - `DELETE /api/tasks/:taskId`
 - `POST /api/tasks/:taskId/transition`
 
+`GET /api/tasks/:taskId`는 현재 사용자에게 보이는 상세 데이터만 반환합니다. `children`, `referenceableTasks`, `referenceableNotes`도 visible task 범위로 필터링됩니다.
+
+`PATCH /api/tasks/:taskId` 권한:
+
+- 태스크 필드 수정: `ADMIN`, `SUPER_ADMIN`, task owner, task assignee, 해당 unit owner만 가능
+- Form/description 수정: `ADMIN`, `SUPER_ADMIN`, task owner, task assignee만 가능
+- watcher 또는 parent chain으로만 보이는 사용자는 조회할 수 있어도 수정할 수 없음
+
+`parentId` 변경은 Work Graph cycle을 만들 수 없습니다. 자기 자신 또는 descendant를 parent로 지정하면 `INVALID_PARENT`를 반환합니다.
+
 생성 body 주요 필드:
 
 ```json
@@ -152,7 +162,7 @@ Comment body:
 - `POST /api/push/subscriptions`
 - `DELETE /api/push/subscriptions`
 
-Inbox는 `readAt`, `ackAt`, `remindCount`를 관리합니다.
+Inbox는 `readAt`, `ackAt`, `remindCount`를 관리합니다. `read`/`ack`는 수신자 또는 관리자 계열이 수행할 수 있지만, `read-all`은 관리자 계열이어도 현재 사용자 본인의 Inbox 항목만 읽음 처리합니다.
 
 ## Template / Workflow
 

@@ -113,7 +113,7 @@ flowchart LR
 
 ## 읽을 코드
 
-- `packages/shared/src/index.ts`: `EngagementEvent`, `Analytics`, `calculateSeedAnalytics`
+- `packages/shared/src/index.ts`: `EngagementEvent`, `Analytics`, seed analytics 계산
 - `apps/api/src/domain/store.ts`: `addEngagement`, `calculateAnalytics`
 - `apps/api/src/server.ts`: engagement 생성 지점, analytics API
-- `apps/web/src/App.tsx`: 분석 화면
+- `apps/web/src/pages/AnalyticsPage.tsx`: 분석 화면

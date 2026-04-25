@@ -77,7 +77,8 @@ Inbox 처리:
 - `remind`: 원 이벤트 발생자 또는 관리자만 수행할 수 있습니다.
 - 수신자 본인은 자기 자신에게 일반 리마인드를 보낼 수 없습니다.
 - `read-all`: 현재 사용자 기준으로 전체 또는 특정 컴포넌트를 읽음 처리합니다.
-- `ADMIN`, `SUPER_ADMIN`은 운영 확인을 위해 더 넓은 Inbox 접근 권한을 가집니다.
+- `ADMIN`, `SUPER_ADMIN`은 개별 Inbox 조회/read/ack/remind에서 더 넓은 운영 접근 권한을 가질 수 있습니다.
+- `read-all`은 예외적으로 `ADMIN`, `SUPER_ADMIN`이어도 현재 사용자 본인의 Inbox 항목만 변경합니다.
 
 ## 컴포넌트별 운영 의미
 
@@ -107,4 +108,5 @@ Inbox 처리:
 - `packages/shared/src/index.ts`: `NotificationSettings`, `WebPushSubscription`, `InboxItem`
 - `apps/api/src/server.ts`: notification settings, push subscription, inbox 처리 API
 - `apps/api/src/domain/store.ts`: `addInbox`
-- `apps/web/src/App.tsx`: Inbox와 알림 설정 화면
+- `apps/web/src/pages/InboxPage.tsx`: Inbox 화면
+- `apps/web/src/pages/settings/SettingsPages.tsx`: 알림 설정 화면

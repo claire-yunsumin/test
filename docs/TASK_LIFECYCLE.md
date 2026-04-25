@@ -40,6 +40,8 @@
 - `phaseOverride`: UI에서 명시적으로 phase를 바꿀 때 사용
 - `workflowStatusId`: workflowSchema의 status id
 
+`parentId` 변경은 cycle을 만들 수 없습니다. 자기 자신이나 descendant를 parent로 지정하면 `INVALID_PARENT`로 차단됩니다.
+
 ## 4. 협업 확장
 
 태스크 상세에서 붙는 데이터:
@@ -74,7 +76,7 @@
 ## 6. 조회와 표현
 
 - `/api/bootstrap`: 현재 사용자 visible task 범위 기준 초기 데이터
-- `/api/tasks/:taskId`: 상세 데이터, referenceable tasks/notes, permissions 포함
+- `/api/tasks/:taskId`: 상세 데이터, visible children, referenceable tasks/notes, permissions 포함
 - 화면:
   - `/tasks`: 리스트/보드/백로그/결정 그래프 탭
   - `/tasks/:taskId`: 상세 워크스페이스

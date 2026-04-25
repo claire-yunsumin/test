@@ -35,6 +35,9 @@
 - 관리자 역할은 전체 태스크를 볼 수 있습니다.
 - 일반 사용자는 owner/assignee/watcher 관계와 parent chain을 볼 수 있습니다.
 - 가시 범위 밖 태스크 접근은 `403 FORBIDDEN`입니다.
+- 보이는 태스크라도 watcher 또는 parent chain만으로 접근한 사용자는 태스크 필드를 수정할 수 없습니다.
+- 태스크 필드 수정은 관리자, task owner, task assignee, 해당 unit owner로 제한합니다.
+- Form/description 수정은 관리자, task owner, task assignee로 제한합니다.
 
 영향 영역:
 
@@ -63,8 +66,9 @@
 
 - `templateId`와 `templateType`은 nullable입니다.
 - 태스크는 `FREEFORM`과 `TEMPLATED` 상태를 모두 지원합니다.
-- 템플릿 적용 시 `formValues`를 `formDefinition.fields` 기준으로 초기화합니다.
+- 템플릿 적용 시 `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
 - Form Output 저장은 템플릿 필드 정의와 호환되어야 합니다.
+- parent 변경은 Work Graph cycle을 만들 수 없습니다.
 
 영향 영역:
 
@@ -121,6 +125,7 @@
 시스템 요구사항:
 
 - Inbox 항목은 읽음, 확인, 리마인드, 전체 읽음 처리를 지원합니다.
+- 전체 읽음 처리(`read-all`)는 관리자여도 현재 사용자 본인의 Inbox만 변경합니다.
 - 알림 설정은 채널과 컴포넌트별 토글을 저장합니다.
 - Push subscription은 등록/해제를 지원합니다.
 

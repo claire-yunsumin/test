@@ -20,7 +20,7 @@ npm run dev
 - Web: http://localhost:5173
 - API: http://localhost:4000/health
 
-`npm run dev` builds `packages/shared` first so runtime imports resolve to compiled JS.
+`npm run dev` runs Turbo in parallel for the API and web workspaces. If compiled shared output is missing, run `npm run build -w packages/shared` once or use `npm run dev:legacy`.
 
 ## Verify
 
@@ -34,11 +34,10 @@ npm run test
 
 ## Implemented PRD Slice
 
-- `/hierarchy`: 5-level decision hierarchy tree with filters and activity badges
-- `/graph`: Decision Graph visualization across hierarchy, context, decisions, and # references
+- `/tasks`: task list, board, backlog, quick creation, and task view tabs
+- `/graph`: Decision Graph visualization across hierarchy, context, decisions, and note references
 - `/tasks/:id`: Decision Workspace with system fields, Notes, Thread, Form Output, Timeline, decision modal
 - `/inbox`: DECISION / DISCUSSION / AWARENESS / RESULT tabs backed by API data
-- `/tasks`: task list and quick creation
-- `/templates`: template/workflow metadata CRUD including decision transitions
-- `/admin/members`: RBAC roles, invite flow mock, and member removal
-- `/admin/analytics`: pilot/retention metrics
+- `/settings/templates` and `/templates`: template/workflow metadata CRUD including decision transitions
+- `/settings/access`: RBAC roles, invite flow mock, and member removal
+- `/settings/analytics`: pilot/retention metrics

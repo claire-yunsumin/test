@@ -2,7 +2,7 @@
 
 ## 한 문장 요약
 
-타임라인은 태스크에서 발생한 생성, 수정, 구조 변경, 노트 변경, 전이/결정 이벤트를 저장하고, 태스크 상세 우측 `타임라인` 탭에서 보여주는 감사 로그입니다.
+타임라인은 태스크에서 발생한 생성, 필드 수정, 구조 변경, 노트 변경, 전이/결정 이벤트를 저장하고, 태스크 상세 우측 `타임라인` 탭에서 보여주는 감사 로그입니다.
 
 ## 발생 지점
 
@@ -12,7 +12,8 @@
 - `PATCH /api/tasks/:taskId`: `STATE_TRANSITION` 또는 `HIERARCHY_CHANGE`
 - `POST /api/tasks/:taskId/transition`: `APPROVAL_REQUESTED`, `COMPLETED`, `STATE_TRANSITION`
 - `POST/PATCH/DELETE note`: `NOTE_UPDATED`
-- `POST/PATCH/DELETE comment`: `COMMENT`, `MENTION`
+
+현재 구현에서 comment 작성/수정/삭제는 Timeline event를 만들지 않습니다. 댓글과 멘션은 Inbox와 Engagement, Decision Graph 참조 신호에 반영됩니다.
 
 ## 저장 구조
 
@@ -53,11 +54,11 @@ flowchart LR
   C --> D[addTimeline]
   D --> E[data.timeline]
   E --> F[GET /api/tasks/:taskId]
-  F --> G[TaskRightPanel 타임라인 탭]
+  F --> G[TaskDetailPage 타임라인 탭]
 ```
 
 ## 읽을 코드
 
 - `apps/api/src/domain/store.ts`: `addTimeline`
 - `apps/api/src/server.ts`: `addTimeline` 호출 지점
-- `apps/web/src/App.tsx`: `TaskRightPanel`, `TimelinePanel`
+- `apps/web/src/pages/TaskDetailPage.tsx`: `TaskRightPanel`, `TimelinePanel`

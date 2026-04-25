@@ -48,7 +48,7 @@ apps/web/src/
 
 - `view=board|backlog|graph`
 - `sort=updated|due|priority`
-- `group=state|assignee|bucket`
+- `group=state|assignee|folder|list`
 - `state`, `type`, `q`, `qf`, `af`
 
 ## 태스크 상세
@@ -57,7 +57,7 @@ apps/web/src/
 
 - 좌측: 시스템 필드, 소유자, 우선순위, 기한, 담당자/참관자, 하위 항목/노트/스레드/파일 수
 - 중앙: 노트, Form Output, 검수 기준
-- 우측: `TaskRightPanel`
+- 우측: `TaskRightPanel` (`TaskDetailPage.tsx`)
   - `스레드` 탭: 댓글, 멘션, 노트 참조, 커맨드형 composer
   - `타임라인` 탭: 이벤트 로그, 세션 묶음, 전체 펼침/접기
 - 하단: 결정 액션 바
@@ -86,6 +86,7 @@ apps/web/src/
 - 프론트 권한 체크는 안내와 버튼 상태 제어용입니다.
 - 실제 보안은 API가 강제합니다.
 - Form Output 편집은 서버의 `permissions.canEditForm`을 따릅니다.
+- 태스크 필드 편집과 첨부 변경은 서버의 `permissions.canEditTask`를 따릅니다.
 
 ## 유지보수 포인트
 

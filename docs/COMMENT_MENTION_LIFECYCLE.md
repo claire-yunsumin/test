@@ -2,7 +2,7 @@
 
 ## 한 문장 요약
 
-댓글과 멘션은 태스크 상세의 논의 신호이며, `@`/`#` 커맨드로 선택한 사람, 태스크, Form 필드, 노트 참조를 서버 가시성 규칙으로 검증한 뒤 Inbox, Timeline, Analytics에 반영합니다.
+댓글과 멘션은 태스크 상세의 논의 신호이며, `@`/`#` 커맨드로 선택한 사람, 태스크, Form 필드, 노트 참조를 서버 가시성 규칙으로 검증한 뒤 Inbox, Analytics, Decision Graph 참조 신호에 반영합니다.
 
 ## 1. 작성
 
@@ -46,17 +46,17 @@ API:
 - `PATCH /api/comments/:commentId`
 - `DELETE /api/comments/:commentId`
 
-수정 시에도 새 `referencedNoteIds`와 `mentions`를 다시 검증합니다. 삭제는 스레드 표시에서 제거되지만, 이미 생성된 Timeline/Inbox/Engagement의 감사 성격 기록은 별도 정책 없이 소급 삭제하지 않는 방향을 기준으로 둡니다.
+수정 시에도 새 `referencedNoteIds`와 `mentions`를 다시 검증합니다. 삭제는 스레드 표시에서 제거되지만, 이미 생성된 Inbox/Engagement 기록은 별도 정책 없이 소급 삭제하지 않는 방향을 기준으로 둡니다.
 
 ## 4. 파생 이벤트
 
 댓글 저장 결과:
 
-- `COMMENT` timeline event 생성
-- 멘션이 있으면 `MENTION` 성격의 이벤트 생성
 - 관련 수신자에게 `DISCUSSION` Inbox 생성
 - `COMMENT_CREATED` engagement event 생성
 - 멘션이 있으면 `MENTION_CREATED` engagement event 생성
+
+현재 구현은 댓글 작성/수정/삭제 자체를 Timeline event로 저장하지 않습니다. Timeline에는 태스크 생성/수정, 구조 변경, 전이/결정, 노트 변경이 기록됩니다.
 
 수신자 계산은 멘션 대상과 task owner/assignee/watcher 맥락을 함께 고려하며, 보통 이벤트 발생자 본인은 제외합니다.
 
@@ -77,10 +77,9 @@ flowchart LR
   C --> D[mentions/referencedNoteIds 포함 요청]
   D --> E[가시성/필드 검증]
   E --> F[Comment 저장]
-  F --> G[Timeline]
-  F --> H[Inbox DISCUSSION]
-  F --> I[Engagement]
-  F --> J[Decision Graph 참조 신호]
+  F --> G[Inbox DISCUSSION]
+  F --> H[Engagement]
+  F --> I[Decision Graph 참조 신호]
 ```
 
 ## 읽을 코드
@@ -88,4 +87,4 @@ flowchart LR
 - `packages/shared/src/index.ts`: `ThreadComment`, `Mention`, `MentionType`
 - `apps/api/src/http/access.ts`: `validateNoteRefs`, `validateMentions`, `visibleTaskIdsFor`
 - `apps/api/src/server.ts`: comment CRUD와 파생 이벤트 생성
-- `apps/web/src/App.tsx`: `TaskRightPanel`, 스레드 composer, 커맨드 검색 UI
+- `apps/web/src/pages/TaskDetailPage.tsx`: `TaskRightPanel`, 스레드 composer, 커맨드 검색 UI

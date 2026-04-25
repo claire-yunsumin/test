@@ -24,7 +24,6 @@ docs/
   APPROVAL_POLICY_SPEC.md
   NOTIFICATION_POLICY_SPEC.md
   ADMIN_OPERATIONS_GUIDE.md
-  BUCKET_GUIDE.md
   business-rules/
     BUSINESS_RULES.md
     DOMAIN_GLOSSARY.md
@@ -83,4 +82,5 @@ docs/
 - 스레드는 입력 중 `@` 또는 `#` 커맨드 검색으로 멘션/노트 참조를 선택합니다.
 - 태스크 상세 우측 영역은 `스레드`와 `타임라인` 탭으로 전환됩니다.
 - 태스크 뷰는 `리스트`, `보드`, `백로그`, `결정 그래프`로 구성됩니다.
+- 태스크 필드 수정은 task owner, assignee, unit owner, admin 계열만 가능하며 watcher는 read-only입니다.
 - Analytics는 `engagement` 이벤트와 현재 콘텐츠 상태를 기반으로 계산합니다.

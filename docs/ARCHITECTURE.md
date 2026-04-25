@@ -46,6 +46,8 @@ docs/
 - 노트는 근거 문서, 스레드는 논의 신호, 타임라인은 변경/결정 로그입니다.
 - Decision Graph는 별도 DB가 아니라 `tasks`, `notes`, `comments`, `timeline`, `referencedNoteIds`, `parentId`를 프론트에서 투영한 뷰입니다.
 - Analytics는 저장된 `engagement` 이벤트와 콘텐츠 상태에서 계산됩니다.
+- 태스크 가시성과 태스크 수정 권한은 분리됩니다. watcher는 볼 수 있지만, 태스크 필드 수정은 owner/assignee/unit owner/admin 계열만 가능합니다.
+- Work Graph parent 변경은 cycle을 만들 수 없도록 서버에서 검증합니다.
 
 ## 주요 아키텍처 결정
 
@@ -69,4 +71,5 @@ docs/
 3. 프론트 권한 체크는 UX 보조일 뿐, 보안 경계가 아닙니다.
 4. `unitId`, `folderId`, `listId` 정합성은 서버가 강제합니다.
 5. 노트 참조와 멘션은 요청 사용자의 visible task 범위 안에서만 허용합니다.
-6. 타임라인/Inbox/Engagement 생성 규칙이 바뀌면 테스트와 문서를 같이 갱신합니다.
+6. 태스크 필드 수정, Form 편집, Inbox read-all처럼 권한 경계가 다른 액션은 문서와 테스트에 별도 명시합니다.
+7. 타임라인/Inbox/Engagement 생성 규칙이 바뀌면 테스트와 문서를 같이 갱신합니다.

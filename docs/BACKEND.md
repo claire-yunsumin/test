@@ -32,8 +32,8 @@ apps/api/src/
 MEMBER < OWNER < ADMIN < SUPER_ADMIN
 ```
 
-- `MEMBER`: 기본 생성/수정 권한. 단, Form 편집은 owner/assignee 또는 admin 계열로 제한됩니다.
-- `OWNER`: 유닛 오너 맥락에서 멤버십 관리 등 일부 관리 작업을 수행합니다.
+- `MEMBER`: 태스크 생성과 댓글/노트 같은 협업 행동을 수행합니다. 보이는 태스크라도 필드 수정은 task owner, assignee, unit owner, admin 계열로 제한됩니다.
+- `OWNER`: 전역 역할 계층상 MEMBER보다 높은 역할이며, 실제 유닛 운영 권한은 `UnitMember.role=OWNER`로 판단합니다.
 - `ADMIN`: 전체 태스크 가시성과 관리 API 접근 권한을 가집니다.
 - `SUPER_ADMIN`: ADMIN 이상 권한이며 IT 인프라 담당자 역할로 사용됩니다.
 
@@ -42,6 +42,7 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - `ADMIN`과 `SUPER_ADMIN`은 모든 태스크를 볼 수 있습니다.
 - 일반 사용자는 `ownerId`, `assigneeIds`, `watcherIds`에 포함된 태스크와 그 parent chain을 볼 수 있습니다.
 - 노트 참조와 멘션 검증은 visible task 집합을 기준으로 합니다.
+- parent chain 순회는 cycle 방어를 포함합니다.
 
 ## 주요 도메인
 
@@ -65,11 +66,15 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 
 - 보안 헤더, CORS, 미등록 사용자 차단
 - IDOR와 역할 경계
+- watcher는 태스크를 볼 수 있어도 필드 수정이 차단되는지 검증
+- parent 변경이 Work Graph cycle을 만들면 차단되는지 검증
+- 상세 응답의 children이 visible scope로 필터링되는지 검증
+- admin의 inbox read-all이 본인 inbox만 바꾸는지 검증
 - 노트 참조와 멘션 검증
 - FREEFORM 노드 생성과 parent 연결
 - Template 적용과 Form field 초기화
 - retention analytics 계산
-- unit/folder/list/bucket 관련 CRUD 스모크 경로
+- unit/folder/list 관련 CRUD 스모크 경로
 
 ## 확장 포인트
 

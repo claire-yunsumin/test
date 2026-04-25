@@ -19,7 +19,7 @@
 MEMBER < OWNER < ADMIN < SUPER_ADMIN
 ```
 
-- `MEMBER`: 기본 생성/수정 가능
+- `MEMBER`: 태스크 생성과 협업 행동 가능. 태스크 필드 수정은 별도 `canEditTask` 정책을 따름
 - `OWNER`: 유닛 오너 맥락의 멤버십 관리 가능
 - `ADMIN`: 전체 가시성과 관리 권한
 - `SUPER_ADMIN`: ADMIN 이상 권한
@@ -44,6 +44,26 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - task owner: 가능
 - task assignee: 가능
 - watcher/view-only 사용자는 제한
+
+## 태스크 필드 수정 권한
+
+`canEditTask(user, task)`:
+
+- `ADMIN`, `SUPER_ADMIN`: 가능
+- task owner: 가능
+- task assignee: 가능
+- 해당 task의 unit에서 `UnitMember.role=OWNER`인 사용자: 가능
+- watcher 또는 parent chain으로만 보이는 사용자는 제한
+
+이 정책은 `PATCH /api/tasks/:taskId`에서 `title`, `priority`, `assigneeIds`, `watcherIds`, `parentId`, `templateId`, `workflowStatusId`, `unitId`, `folderId`, `listId` 같은 태스크 필드 수정에 적용됩니다.
+
+## Work Graph 순환 방지
+
+`parentId` 변경 시 `wouldCreateTaskCycle()`로 새 parent chain을 검사합니다.
+
+- 자기 자신을 parent로 지정할 수 없습니다.
+- 자신의 descendant를 parent로 지정할 수 없습니다.
+- 이미 손상된 순환 parent chain을 만난 경우에도 순회를 중단해 무한 루프를 피합니다.
 
 ## 멘션/참조 검증
 

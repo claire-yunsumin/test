@@ -138,4 +138,4 @@ CANNOT_REMOVE_SELF_OWNER
 - `apps/api/src/http/access.ts`: `requireRole`, 역할 비교
 - `apps/api/src/server.ts`: admin members, invitations, unit members API
 - `apps/api/src/security.test.ts`: 관리자 자기 자신 삭제/초대 권한 회귀 테스트
-- `apps/web/src/App.tsx`: 관리자 화면과 설정 화면
+- `apps/web/src/pages/settings/SettingsPages.tsx`: 관리자 화면과 설정 화면

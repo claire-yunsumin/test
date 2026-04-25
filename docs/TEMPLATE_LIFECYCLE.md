@@ -34,7 +34,7 @@ Template 핵심 필드:
 1. Template 존재 여부와 enabled 상태를 확인합니다.
 2. 태스크의 `templateId`, `templateType`, `structureState`를 갱신합니다.
 3. `structureState=TEMPLATED`로 전환합니다.
-4. `formValues`를 `formDefinition.fields`의 key 기준으로 초기화합니다.
+4. `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
 5. `TEMPLATE_APPLIED` engagement event를 생성합니다.
 
 ## 3. Form Output 저장
@@ -83,4 +83,5 @@ flowchart LR
 - `packages/shared/src/index.ts`: `Template`, `FormFieldDefinition`, `WorkflowStatusDefinition`
 - `apps/api/src/server.ts`: template CRUD, task template 적용, transition 처리
 - `apps/api/src/domain/store.ts`: engagement와 task 직렬화
-- `apps/web/src/App.tsx`: Template 관리, Form Output, 결정 액션 UI
+- `apps/web/src/pages/settings/SettingsPages.tsx`: Template 관리
+- `apps/web/src/pages/TaskDetailPage.tsx`: Form Output, 결정 액션 UI
