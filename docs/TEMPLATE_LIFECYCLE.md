@@ -34,7 +34,7 @@ Template 핵심 필드:
 1. Template 존재 여부와 enabled 상태를 확인합니다.
 2. 태스크의 `templateId`, `templateType`, `structureState`를 갱신합니다.
 3. `structureState=TEMPLATED`로 전환합니다.
-4. `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
+4. `formValues`는 기존 값을 보존하고 `formDefinition` 배열의 field key 누락분을 보강합니다.
 5. `TEMPLATE_APPLIED` engagement event를 생성합니다.
 
 ## 3. Form Output 저장
@@ -72,7 +72,7 @@ flowchart LR
   A[Template 생성/수정] --> B[formDefinition/workflowSchema 저장]
   B --> C[Task에 Template 적용]
   C --> D[structureState=TEMPLATED]
-  D --> E[formValues 초기화]
+  D --> E[formValues 보강]
   E --> F[Form Output 저장]
   F --> G[workflowSchema 전이]
   G --> H[Timeline/Inbox/Engagement]

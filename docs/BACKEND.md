@@ -59,6 +59,8 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - `addInbox`: 결정/논의/인지/결과 알림을 만듭니다.
 - `addEngagement`: 노드 생성, Template 적용, Form 저장, 댓글/멘션, 방문 등 분석용 행동을 기록합니다.
 - `calculateAnalytics`: 현재 이벤트와 콘텐츠 상태를 기준으로 리텐션/협업 지표를 계산합니다.
+- 템플릿 교체 시 상태는 `mapWorkflowStatusForTemplate()`(카테고리 -> default -> legacy fallback)로 매핑하며, 최종 실패 시 `WORKFLOW_STATUS_MAPPING_REQUIRED`를 반환합니다.
+- 템플릿 교체 후 승인정책은 `validatePolicyAfterTemplateChange()`로 재검증하고 `policyReviewRequired`/`policyReviewReason`에 반영합니다.
 
 ## 테스트 전략
 
@@ -72,7 +74,7 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - admin의 inbox read-all이 본인 inbox만 바꾸는지 검증
 - 노트 참조와 멘션 검증
 - FREEFORM 노드 생성과 parent 연결
-- Template 적용과 Form field 초기화
+- Template 적용과 Form field 보강(기존값 보존 + 누락분 채움)
 - 레거시 FILE/`__task_files` 필드 제거 및 저장 시 재유입 방지
 - 노트 생성/수정에서 태그(`tags`) 저장과 조회 반영
 - retention analytics 계산

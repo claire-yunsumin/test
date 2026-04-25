@@ -5714,11 +5714,13 @@ textarea,
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  align-items: start;
 }
 
 .home-panel {
   min-width: 0;
   padding: 12px;
+  align-self: start;
 }
 
 .home-list {
@@ -5990,9 +5992,19 @@ textarea,
 }
 
 .inbox-controls {
-  padding: 0 10px;
+  padding: 0 8px;
   border-bottom: 1px solid #e2e8f0;
   background: #fff;
+}
+
+.inbox-controls .tabs {
+  padding: 0;
+  border-radius: 0;
+}
+
+.inbox-controls .tabs button {
+  min-height: 26px;
+  padding: 4px 8px;
 }
 
 .inbox-row {

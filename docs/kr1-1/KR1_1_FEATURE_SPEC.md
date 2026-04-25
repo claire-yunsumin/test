@@ -14,7 +14,7 @@
 | 단계 | 기능군 | 필수 기능 스펙 | 입력/행동 | 출력/결과 | 관련 영역 |
 | --- | --- | --- | --- | --- | --- |
 | 1 | 형상화 (Work Graph) | 자유 노드 생성, parent 연결, cycle 방지, 계층 맥락 유지 | 사용자가 Objective/KR/Task 노드 생성 및 관계 연결 | Work Graph에 지칭 가능한 결정 대상 생성 | Tasks View (list/board/backlog/graph), Task CRUD |
-| 2 | 정형화 (Template) | Template 적용, `structureState` 전환(FREEFORM/TEMPLATED), `formValues` 필드키 초기화, inspection/workflow 활성화 | 반복/규칙이 필요한 노드에 Template 적용 | 산출물 구조/검수 기준/전이 기준 명확화 | Templates, Task Detail Form Output |
+| 2 | 정형화 (Template) | Template 적용, `structureState` 전환(FREEFORM/TEMPLATED), `formValues` 기존값 보존 + 필드키 누락분 보강, inspection/workflow 활성화 | 반복/규칙이 필요한 노드에 Template 적용 | 산출물 구조/검수 기준/전이 기준 명확화 | Templates, Task Detail Form Output |
 | 3 | 멘션 시작 | `@`/`#` 기반 멘션/참조, 서버 검증(`INVALID_MENTION`, `INVALID_NOTE_REFERENCE`) | 사용자가 노드/사람/필드/노트를 지칭해 논의 시작 | 대상 귀속 Thread 생성, 논의 시작점 명확화 | Thread Composer, Comment API |
 
 ## 기능 요구사항 (체크리스트)
@@ -80,3 +80,4 @@
 
 검증 메모:
 - API 테스트: `npm run test -w apps/api` 통과 (35 passed / 0 failed)
+- 워크플로우 상태 처리 수용 기준: `KR11-WF-01 ~ KR11-WF-04` 모두 Pass (`KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md` 동기화)

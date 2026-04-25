@@ -66,12 +66,37 @@ import {
 
 export function InboxView({ data, onReload }: { data: AppData; onReload: () => Promise<void> }) {
   const [tab, setTab] = useState<InboxComponent>("DECISION");
+  const [quickDecision, setQuickDecision] = useState<{
+    itemId: string;
+    taskId: string;
+    taskTitle: string;
+    actions: Array<{ toState: TaskState; decisionType: DecisionType; title: string; tone: "primary" | "secondary" | "danger" }>;
+    selectedDecisionType: DecisionType;
+    reason: string;
+    busy: boolean;
+    error: string | null;
+    acked: boolean;
+  } | null>(null);
   const meId = data.me.id;
   const items = data.inbox.filter((item) => item.componentType === tab && item.userId === meId);
   const sentItems = data.inbox
     .filter((item) => item.sourceUserId === meId && item.userId !== meId)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const taskMap = new Map(data.tasks.map((task) => [task.id, task]));
+  const approvalModeByTaskId = useMemo(() => {
+    const latest = new Map<string, { createdAt: number; mode: string | null }>();
+    data.timeline.forEach((event) => {
+      if (event.type !== "APPROVAL_REQUESTED") return;
+      const payload = event.payload as { approvalMode?: unknown } | undefined;
+      const mode = typeof payload?.approvalMode === "string" ? payload.approvalMode : null;
+      const createdAt = new Date(event.createdAt).getTime();
+      const current = latest.get(event.taskId);
+      if (!current || createdAt >= current.createdAt) {
+        latest.set(event.taskId, { createdAt, mode });
+      }
+    });
+    return new Map([...latest.entries()].map(([taskId, value]) => [taskId, value.mode]));
+  }, [data.timeline]);
   const slaHours = data.notificationSettings[0]?.slaHours ?? 24;
 
   const markRead = async (id: string) => {
@@ -89,6 +114,61 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
   const markAllRead = async (componentType?: InboxComponent) => {
     await request("/api/inbox/read-all", { method: "PATCH", body: JSON.stringify(componentType ? { componentType } : {}) });
     await onReload();
+  };
+  const openQuickDecision = (
+    itemId: string,
+    task: { id: string; title: string; currentState: TaskState },
+    acked: boolean,
+    approvalMode: string | null
+  ) => {
+    const actions = decisionActions(task.currentState, true)
+      .filter((action) => action.decisionType === "APPROVE" || action.decisionType === "REJECT" || action.decisionType === "SUPPLEMENT")
+      .map((action) =>
+        action.decisionType === "APPROVE" && approvalMode === "CONSENSUS"
+          ? { ...action, title: "합의" }
+          : action
+      );
+    if (!actions.length) return;
+    setQuickDecision({
+      itemId,
+      taskId: task.id,
+      taskTitle: task.title,
+      actions,
+      selectedDecisionType: actions[0].decisionType,
+      reason: "",
+      busy: false,
+      error: null,
+      acked
+    });
+  };
+  const submitQuickDecision = async () => {
+    if (!quickDecision) return;
+    const selected = quickDecision.actions.find((action) => action.decisionType === quickDecision.selectedDecisionType);
+    if (!selected || !quickDecision.reason.trim()) return;
+    try {
+      setQuickDecision((prev) => (prev ? { ...prev, busy: true, error: null } : prev));
+      await request(`/api/tasks/${quickDecision.taskId}/transition`, {
+        method: "POST",
+        body: JSON.stringify({
+          toState: selected.toState,
+          decisionType: selected.decisionType,
+          reason: quickDecision.reason.trim(),
+          referencedNoteIds: []
+        })
+      });
+      await request(`/api/inbox/${quickDecision.itemId}/read`, { method: "PATCH" });
+      if (!quickDecision.acked) {
+        await request(`/api/inbox/${quickDecision.itemId}/ack`, { method: "PATCH" });
+      }
+      await onReload();
+      setQuickDecision(null);
+    } catch (err) {
+      setQuickDecision((prev) =>
+        prev
+          ? { ...prev, busy: false, error: err instanceof Error ? err.message : "결정 처리에 실패했습니다." }
+          : prev
+      );
+    }
   };
   const sentSummary = useMemo(() => {
     const total = sentItems.length;
@@ -145,6 +225,21 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
               </div>
               <div className="row-actions">
                 <button className="button secondary" onClick={() => go(`/tasks/${item.taskId}`)}>열기</button>
+                {tab === "DECISION" && item.eventType === "APPROVAL_REQUESTED" && taskMap.get(item.taskId) ? (
+                  <button
+                    className="button primary"
+                    onClick={() =>
+                      openQuickDecision(
+                        item.id,
+                        taskMap.get(item.taskId)!,
+                        Boolean(item.ackAt),
+                        approvalModeByTaskId.get(item.taskId) ?? null
+                      )
+                    }
+                  >
+                    결정 입력
+                  </button>
+                ) : null}
                 <button className="button secondary" onClick={() => void markRead(item.id)}>{item.readAt ? "안 읽음" : "읽음"}</button>
                 <button className="button secondary" onClick={() => void markAck(item.id)}>{item.ackAt ? "처리 취소" : "처리 완료"}</button>
               </div>
@@ -186,6 +281,48 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
           {sentItems.length === 0 && <p className="inbox-empty">보낸 요청/알림이 없습니다.</p>}
         </aside>
       </div>
+      {quickDecision && (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">결정 빠른 처리</div>
+                <h2>{quickDecision.taskTitle}</h2>
+                <p className="muted">승인/보완요청/반려 중 하나를 선택하고 리뷰 코멘트를 남기면 요청자 수신함에 결과가 전달됩니다.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={() => setQuickDecision(null)}>×</button>
+            </div>
+            <div className="row-actions left">
+              {quickDecision.actions.map((action) => (
+                <button
+                  key={action.decisionType}
+                  className={`button ${quickDecision.selectedDecisionType === action.decisionType ? "primary" : "secondary"}`}
+                  onClick={() => setQuickDecision((prev) => (prev ? { ...prev, selectedDecisionType: action.decisionType } : prev))}
+                  type="button"
+                >
+                  {action.title}
+                </button>
+              ))}
+            </div>
+            <label>
+              리뷰 코멘트
+              <textarea
+                rows={5}
+                placeholder="결정 근거와 피드백을 입력하세요."
+                value={quickDecision.reason}
+                onChange={(event) => setQuickDecision((prev) => (prev ? { ...prev, reason: event.target.value } : prev))}
+              />
+            </label>
+            {quickDecision.error ? <p className="form-error">{quickDecision.error}</p> : null}
+            <div className="row-actions">
+              <button className="button secondary" type="button" onClick={() => setQuickDecision(null)} disabled={quickDecision.busy}>취소</button>
+              <button className="button primary" type="button" onClick={() => void submitQuickDecision()} disabled={quickDecision.busy || !quickDecision.reason.trim()}>
+                {quickDecision.busy ? "처리 중..." : "결정 전송"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

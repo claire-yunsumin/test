@@ -15,7 +15,7 @@
 | W1 | 결정 대상 구조화 (Work Graph, Template) | `FREEFORM/TEMPLATED`, 템플릿 적용, Form Output, parent cycle 방지, 그래프 뷰 탭이 Release 3 + System Spec에 명시 | 달성 |
 | W2 | 논의-결정 흐름 귀속 (Thread/Notes/상태전이/알람) | 멘션/노트 참조 검증, 타임라인, 전이 시 reason 필수, Inbox 라우팅이 Release 2 + System Spec에 명시 | 달성 |
 | KR 1.1-형상화 | Objective->KR->Task 형상화 가능 | 자유 노드 생성, parent 연결, 그래프/리스트/보드/백로그 뷰 제공 | 달성 |
-| KR 1.1-정형화 | Template 적용으로 산출물 구조화 | templateId/templateType, formValues 초기화, 레거시 파일 필드 제거 규칙 | 달성 |
+| KR 1.1-정형화 | Template 적용으로 산출물 구조화 | templateId/templateType, formValues 보강(기존값 보존 + 누락 필드 채움), 레거시 파일 필드 제거 규칙 | 달성 |
 | KR 1.1-멘션 | 노드/필드/노트 멘션으로 논의 시작 | `@`/`#` composer, MEMBER/TASK/FORM_FIELD/NOTE 검증, INVALID_MENTION 처리 | 달성 |
 | KR 1.2-알람 분류 | 결정/논의/인지/결과 흐름 기반 처리 | 이벤트-컴포넌트 명시 매핑 보강, Inbox read/ack/remind/read-all 액션이 API/UI에서 모두 노출 | 달성 |
 | KR 1.2-Notes 귀속 | Notes/Thread가 결정 대상에 귀속 | 노트 CRUD + 태그 + 참조 링크 + 스레드 결합 구조 정의 | 달성 |
@@ -46,4 +46,4 @@
 | --- | --- | --- |
 | P1 | KR 2.1 AI 기능 명세/구현 | AI 초안 생성, AI 검수, Template->AI Context 주입의 API+UI+지표 확정 |
 | P2 | KR 2.2 변경 인지 모델 고정 | 실행 시점 인지 마커, 신규 액션 한정 Push, 전파 depth 규칙 수용 기준 확정 |
-| P3 | O1 Retention 판정 자동화 | Alarm->Action, 구조 갱신률, 자발 재방문율을 리포트 카드로 자동 판정 |
+| P3 | O1 Retention 운영 고도화 | 현행 자동 판정 지표(Alarm->Action, 구조 갱신률, 자발 재방문율)의 임계치/운영 리포트 고도화 |

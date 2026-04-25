@@ -37,7 +37,7 @@ Objective 1/KR 1.1의 "형상화 -> 정형화 -> 멘션" 루프를 태스크 운
 
 - Create: FREEFORM 블록 생성은 타입 선택 즉시 생성되며 기본 편집 포커스를 제공합니다.
 - Read: FREEFORM/TEMPLATED 상태에 따라 읽기 구조와 안내 문구를 분리해 혼동을 줄입니다.
-- Update: 템플릿 적용/변경 시 Form Output 재초기화 영향 범위를 사전 고지합니다.
+- Update: 템플릿 적용/변경 시 Form Output 보강/변경 영향 범위를 사전 고지합니다.
 - Delete: 블록/첨부 삭제는 복구 가능 여부와 본문 참조(토큰/프리뷰) 처리 규칙을 명시합니다.
 
 ## 엣지케이스 / 예외사항
@@ -66,7 +66,7 @@ Objective 1/KR 1.1의 "형상화 -> 정형화 -> 멘션" 루프를 태스크 운
 
 1. `templateType`과 `templateId`는 nullable이어야 합니다.
 2. FREEFORM 태스크는 템플릿 없이 생성/수정/parent 연결이 가능해야 합니다.
-3. 템플릿 적용 시 `structureState=TEMPLATED`가 되고 `formValues`가 필드 키 기준으로 초기화됩니다.
+3. 템플릿 적용 시 `structureState=TEMPLATED`가 되고 `formValues`는 기존값을 보존하며 필드 키 누락분을 보강합니다.
 4. `unitId`, `folderId`, `listId` 조합은 생성/수정 시 항상 검증합니다.
 5. parent 연결은 Work Graph cycle을 만들 수 없습니다.
 6. 계층과 결정 그래프는 별도 메뉴가 아니라 태스크 뷰 탭으로 제공됩니다.

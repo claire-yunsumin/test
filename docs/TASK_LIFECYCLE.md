@@ -20,7 +20,7 @@
 - Task 저장
 - `TASK_CREATED` 타임라인 생성
 - `NODE_CREATED` engagement 생성
-- Template이 있으면 Form field 초기화와 `TEMPLATE_APPLIED` engagement 생성
+- Template이 있으면 Form field 누락분 보강(기존값 보존)과 `TEMPLATE_APPLIED` engagement 생성
 
 ## 2. 형상화와 정형화
 
@@ -95,7 +95,7 @@ flowchart LR
   A[POST /api/tasks] --> B[권한/입력/위치 검증]
   B --> C[FREEFORM 노드 저장]
   C --> D{Template 적용?}
-  D -->|예| E[TEMPLATED + Form field 초기화]
+  D -->|예| E[TEMPLATED + Form field 보강]
   D -->|아니오| F[자유 형상화 유지]
   E --> G[노트/스레드/Form/첨부 누적]
   F --> G

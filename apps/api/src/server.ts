@@ -970,19 +970,27 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
   addEngagement({ type: "DECISION_TRANSITION", actorId: meId(req), taskId: task.id, metadata: { toState: targetState, toStatusId: targetStatusId, decisionType: body.decisionType } });
 
   const recipients = new Set([...task.assigneeIds, ...task.watcherIds]);
+  recipients.add(task.ownerId);
   if (isPendingApprovalStatus(task, targetStatusId)) {
     const approvers = selectedPolicy ? approversByPolicy(selectedPolicy) : new Set(data.members.filter((member) => ["OWNER", "ADMIN", "SUPER_ADMIN"].includes(member.role)).map((member) => member.id));
     approvers.forEach((id) => recipients.add(id));
   }
   recipients.delete(meId(req));
+  const decisionLabel = body.decisionType === "APPROVE"
+    ? "승인"
+    : body.decisionType === "REJECT"
+      ? "반려"
+      : body.decisionType === "SUPPLEMENT"
+        ? "보완 요청"
+        : "상태 변경";
   recipients.forEach((userId) => {
     addInbox({
       userId,
       taskId: task.id,
       componentType: componentForEvent(event.type),
       eventType: event.type,
-      title: body.decisionType === "STATE_ONLY" ? "상태 변경" : "결정 이벤트",
-      message: `${task.title}: ${fromState} → ${targetState}`,
+      title: `${decisionLabel} 결과`,
+      message: `${task.title}: ${fromState} → ${targetState} · 코멘트: ${body.reason}`,
       sourceUserId: meId(req)
     });
   });

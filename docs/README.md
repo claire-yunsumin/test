@@ -54,7 +54,7 @@ docs/
 ## 생애주기 문서
 
 - `TASK_LIFECYCLE.md`: 태스크 생성, 형상화/정형화, 배치, 협업, 전이, 삭제
-- `TEMPLATE_LIFECYCLE.md`: Template 생성/수정, 태스크 적용, Form Output 초기화, workflow 전이
+- `TEMPLATE_LIFECYCLE.md`: Template 생성/수정, 태스크 적용, Form Output 보강(기존값 보존 + 누락분 채움), workflow 전이
 - `WORKSPACE_LIFECYCLE.md`: Unit, Folder, List, Task 배치와 무결성 검증
 - `COMMENT_MENTION_LIFECYCLE.md`: 스레드 댓글, `@`/`#` 커맨드, 멘션/노트 참조 검증, 파생 이벤트
 - `TIMELINE_LIFECYCLE.md`: 타임라인 이벤트 생성, 저장 구조, 상세 우측 탭 표현

@@ -302,6 +302,7 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               notes={notes}
               comments={comments}
               onOpenDecision={setDecision}
+              approvalModeHint={typeof approvalPayload.approvalMode === "string" ? approvalPayload.approvalMode : null}
               onReload={load}
             />
           </div>
@@ -600,6 +601,7 @@ function SystemFieldsPanel({
   notes,
   comments,
   onOpenDecision,
+  approvalModeHint,
   onReload
 }: {
   task: TaskView;
@@ -613,6 +615,7 @@ function SystemFieldsPanel({
   notes: Note[];
   comments: ThreadComment[];
   onOpenDecision: (action: { toState: TaskState; decisionType: DecisionType; title: string }) => void;
+  approvalModeHint: string | null;
   onReload: () => Promise<void>;
 }) {
   const [error, setError] = useState<string | null>(null);
@@ -888,6 +891,8 @@ function SystemFieldsPanel({
     return `${names[0]} +${names.length - 1}`;
   }, [members, task.assigneeIds]);
   const nextActions = decisionActions(decisionState, canApprove);
+  const decisionTitle = (action: { decisionType: DecisionType; title: string }) =>
+    action.decisionType === "APPROVE" && approvalModeHint === "CONSENSUS" ? "합의" : action.title;
   const transitionGateTargets = useMemo(() => {
     const transitions = task.template?.workflowSchema?.transitions ?? [];
     const fromStatusId = LEGACY_STATE_TO_STATUS_ID[decisionState];
@@ -1060,11 +1065,11 @@ function SystemFieldsPanel({
                   key={`${action.toState}-${action.title}`}
                   className={`next-action-item tone-${action.tone}`}
                   onClick={() => {
-                    onOpenDecision(action);
+                    onOpenDecision({ ...action, title: decisionTitle(action) });
                     setNextActionOpen(false);
                   }}
                 >
-                  <strong>{action.title}</strong>
+                  <strong>{decisionTitle(action)}</strong>
                   <small>
                     {STATE_META[action.toState].label}로 전환
                     {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[action.toState])

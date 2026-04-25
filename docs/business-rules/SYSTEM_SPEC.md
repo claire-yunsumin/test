@@ -80,7 +80,7 @@
 - `templateId`와 `templateType`은 nullable입니다.
 - 태스크는 `FREEFORM`과 `TEMPLATED` 상태를 모두 지원합니다.
 - 템플릿은 lifecycle(`DRAFT/ACTIVE/DEPRECATED/ARCHIVED`) 상태를 가져야 합니다.
-- 템플릿 적용 시 `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
+- 템플릿 적용 시 `formValues`는 기존 값을 보존하고 `formDefinition` 배열의 field key 누락분을 보강합니다.
 - Form Output 저장은 템플릿 필드 정의와 호환되어야 합니다.
 - 템플릿 생성/수정 시 목적(`purposeTag`)과 기대 결과(`successOutcome`)를 관리할 수 있어야 합니다.
 - 템플릿 생성/수정/워크플로우 저장 시 fingerprint를 갱신하고 유사 후보를 계산할 수 있어야 합니다.
@@ -121,6 +121,9 @@
 - 전이 요청은 `reason`을 필수로 받습니다.
 - `TaskState`는 `DRAFT`, `IN_PROGRESS`, `DONE`, `CANCELED`입니다.
 - 승인 대기 등 세부 단계는 `WorkflowStatusCategory`로 표현합니다.
+- 템플릿 전이 조건의 `approvalGate`가 활성화된 경우, 정책 선택은 `approvalGate.policyId`를 우선하고 없으면 task의 `approvalPolicyId`를 사용합니다.
+- 선택된 정책의 `mode`/`approvalLines`/`finalApproverId`에 따라 결재 유형과 결재 라인을 해석해야 합니다.
+- `mode=CONSENSUS`에서는 UI의 `APPROVE` 라벨을 `합의`로 표시하되, API 전송값은 `decisionType=APPROVE`를 유지합니다.
 - 전이 결과는 타임라인 이벤트와 Inbox 항목을 생성합니다.
 
 영향 영역:
@@ -128,6 +131,7 @@
 - `/api/tasks/:taskId/transition`
 - 우측 타임라인 탭
 - 승인/반려/보완 UX
+- `docs/APPROVAL_POLICY_SPEC.md`의 Inbox 승인 처리 플로우 및 정책 적용 순서
 
 ## 7. 뷰와 그룹
 

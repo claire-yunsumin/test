@@ -9,8 +9,8 @@
 대표 생성 지점:
 
 - `POST /api/tasks`: `TASK_CREATED`
-- `PATCH /api/tasks/:taskId`: `STATE_TRANSITION` 또는 `HIERARCHY_CHANGE`
-- `POST /api/tasks/:taskId/transition`: `APPROVAL_REQUESTED`, `COMPLETED`, `STATE_TRANSITION`
+- `PATCH /api/tasks/:taskId`: `STATE_TRANSITION`, `HIERARCHY_CHANGE`, `TEMPLATE_APPLIED/REPLACED/REMOVED`
+- `POST /api/tasks/:taskId/transition`: `APPROVAL_REQUESTED`, `APPROVAL_APPROVED/REJECTED`, `COMPLETED`, `STATE_TRANSITION`
 - `POST/PATCH/DELETE note`: `NOTE_UPDATED`
 
 현재 구현에서 comment 작성/수정/삭제는 Timeline event를 만들지 않습니다. 댓글과 멘션은 Inbox와 Engagement, Decision Graph 참조 신호에 반영됩니다.

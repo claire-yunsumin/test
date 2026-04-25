@@ -12,7 +12,7 @@
 
 | 항목 | 현재 동작 |
 | --- | --- |
-| 템플릿 적용 | `templateId`, `templateType`, `structureState`를 변경하고 `formValues`를 초기화/보강 |
+| 템플릿 적용 | `templateId`, `templateType`, `structureState`를 변경하고 `formValues` 기존값 보존 + 누락 필드 보강 |
 | 상태 필드 | 템플릿 변경 시 카테고리 기반 안전 매핑을 수행하고, 필요 시 기본 상태/legacy fallback을 적용 |
 | 승인정책 | `approvalPolicyId`는 자동 재선정하지 않으며 유효성 재검증 후 불일치 시 재검토 플래그를 남김 |
 | 협업 데이터 | Thread/Timeline/Notes/Attachments는 `taskId` 귀속으로 유지 |
@@ -26,9 +26,9 @@
 | `structureState` | `TEMPLATED`로 전환 | `FREEFORM`으로 전환 | `TEMPLATED` 유지 | 모드 플래그 |
 | `templateId`/`templateType` | 새 템플릿 값 세팅 | `templateId=null`, `templateType`는 패치값 또는 기존값 유지 | 새 템플릿으로 교체 | 타입은 유지/수정 가능 |
 | `formValues` | 기존값 유지 + 템플릿 필드 key 누락분 보강 | 자동 삭제 없이 유지 | 기존값 유지 + 신규 필드 보강 | 데이터 손실 최소화 우선 |
-| `currentState` | 자동 변경 없음 | 자동 변경 없음(전환 결과에 맞춰 유지) | legacy 상태 규칙으로 재정렬 | 명시 patch/transition에서만 변경 |
+| `currentState` | 자동 변경 없음 | 자동 변경 없음(전환 결과에 맞춰 유지) | 안전 매핑 결과 `workflowStatusId`에 맞춰 동기화 | 명시 patch/transition에서만 변경 |
 | `workflowStatusId` | 카테고리 매핑 우선 | 카테고리 -> default -> legacy fallback | `LEGACY_STATE_TO_STATUS_ID[currentState]`로 정렬 | 카테고리 -> default -> legacy fallback |
-| `approvalPolicyId` | 유효성 재검증 후 유지/정리 | 유효성 재검증 후 필요 시 null + 재검토 플래그 | 정책 재검토 플래그 해제 | 자동 재선정 없음, 불일치 가시화 |
+| `approvalPolicyId` | 유효성 재검증 후 유지/정리 | 유효성 재검증 후 필요 시 null + 재검토 플래그 | 유효성 재검증 결과에 따라 유지/정리 + 재검토 플래그 설정/해제 | 자동 재선정 없음, 불일치 가시화 |
 | Workflow transition rule | 템플릿이 있으면 해당 workflowSchema 기준 평가 | 템플릿 해제 시 legacy 상태 규칙 기준 | 새 템플릿 규칙으로 즉시 평가 | 실행 규칙은 바뀌나 상태값은 유지 |
 | Thread(댓글/멘션) | 유지 | 유지 | 유지 | `taskId` 귀속 |
 | Timeline | 유지 + 추가 이벤트 누적 | 유지 + 추가 이벤트 누적 | 유지 + 추가 이벤트 누적 | 이력 연속성 유지 |
@@ -73,10 +73,10 @@
 
 | ID | 기준 | 판정 |
 | --- | --- | --- |
-| KR11-WF-01 | 템플릿 변경 시 유효하지 않은 `workflowStatusId`가 남지 않는다 | Pass/Fail |
-| KR11-WF-02 | 사용자 진행 상태 의미(`DRAFT/IN_PROGRESS/DONE/CANCELED`)가 보존된다 | Pass/Fail |
-| KR11-WF-03 | 매핑 결과가 타임라인/이벤트에서 추적 가능하다 | Pass/Fail |
-| KR11-WF-04 | FREEFORM->TEMPLATED 전환 시 폼 초기화와 상태 매핑이 충돌하지 않는다 | Pass/Fail |
+| KR11-WF-01 | 템플릿 변경 시 유효하지 않은 `workflowStatusId`가 남지 않는다 | Pass |
+| KR11-WF-02 | 사용자 진행 상태 의미(`DRAFT/IN_PROGRESS/DONE/CANCELED`)가 보존된다 | Pass |
+| KR11-WF-03 | 매핑 결과가 타임라인/이벤트에서 추적 가능하다 | Pass |
+| KR11-WF-04 | FREEFORM->TEMPLATED 전환 시 폼 초기화와 상태 매핑이 충돌하지 않는다 | Pass |
 
 ## 구현 반영 상태
 
@@ -86,3 +86,10 @@
 | 최종 유효성 검증 및 오류 코드 | 완료 | `WORKFLOW_STATUS_MAPPING_REQUIRED` 검증 로직 |
 | 정책 재검토 플래그 | 완료 | `policyReviewRequired`, `policyReviewReason` |
 | 이벤트 추적성 | 완료 | `TEMPLATE_APPLIED/REPLACED/REMOVED` + 타임라인 payload |
+
+## 검증 근거 (최신)
+
+| 항목 | 결과 | 근거 |
+| --- | --- | --- |
+| API 회귀 테스트 | 통과 | `npm run test -w apps/api` → `35 passed / 0 failed` |
+| KR1.1 전환 정책 스위트 | 통과 | `KR1.1 transition policy (KR11-TP-v1)` 4개 시나리오 모두 통과 |

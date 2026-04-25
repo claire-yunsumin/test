@@ -110,7 +110,7 @@ Delete(삭제) 규칙:
 - `workflow`
 - 선택적 `workflowSchema`
 
-템플릿 적용 시 태스크는 `TEMPLATED`가 되고, `formValues`는 템플릿 필드 키 기준으로 초기화됩니다. 이후 Form Output UI는 임의 key/value가 아니라 템플릿 필드 정의를 기준으로 렌더링합니다.
+템플릿 적용 시 태스크는 `TEMPLATED`가 되고, `formValues`는 기존 값을 보존한 채 템플릿 필드 키 누락분을 보강합니다. 이후 Form Output UI는 임의 key/value가 아니라 템플릿 필드 정의를 기준으로 렌더링합니다.
 
 추가 운영 규칙:
 
