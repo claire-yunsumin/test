@@ -68,6 +68,8 @@
 - 태스크는 `FREEFORM`과 `TEMPLATED` 상태를 모두 지원합니다.
 - 템플릿 적용 시 `formValues`를 `formDefinition` 배열의 field key 기준으로 초기화합니다.
 - Form Output 저장은 템플릿 필드 정의와 호환되어야 합니다.
+- 레거시 파일 필드(`__task_files`, `FILE` type)는 Form Output/Template 저장 시 제거되어야 하며 재유입되면 안 됩니다.
+- 자유폼 Form Output 편집은 블록 단위 추가/편집 흐름을 지원해야 합니다.
 - parent 변경은 Work Graph cycle을 만들 수 없습니다.
 
 영향 영역:
@@ -85,6 +87,8 @@
 - 댓글 작성/수정 시 `mentions`를 검증합니다.
 - `FORM_FIELD` 멘션은 대상 태스크와 필드 키 존재를 확인합니다.
 - 유효하지 않은 참조는 `INVALID_NOTE_REFERENCE` 또는 `INVALID_MENTION`으로 실패합니다.
+- 노트는 본문 마크다운 편집과 태그 라벨(`tags`)을 지원해야 합니다.
+- 노트 공유 링크를 스레드 입력에 붙여넣을 때 `#노트` 참조로 변환될 수 있어야 합니다.
 
 영향 영역:
 

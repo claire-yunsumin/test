@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, type ClipboardEvent as ReactClipboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   LEGACY_STATE_TO_STATUS_ID,
   INBOX_COMPONENTS,
@@ -28,7 +28,7 @@ import {
   type UnitMember,
   type UnitMemberRole
 } from "@hwe/shared";
-import { Badge, Centered, FilterShell, Meta, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "../components/ui";
+import { Badge, Centered, FilterShell, Meta, MetaWithHint, PageHeader, PanelHeader, PanelTitle, Select, Tabs } from "../components/ui";
 import { request } from "../lib/api";
 import { go } from "../lib/router";
 import type { TaskDetail, TaskView } from "../lib/viewTypes";
@@ -260,6 +260,7 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               members={members}
               templates={templates}
               referenceableTasks={referenceableTasks}
+              children={children}
               canEditTask={canEditTask}
               canApprove={canApprove}
               childrenCount={children.length}
@@ -276,13 +277,15 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               <button className="button secondary" onClick={() => go(`/tasks/${parent.id}`)}>확인</button>
             </div>
           )}
-          <FormOutput task={task} canEditForm={canEditForm} onReload={load} />
+          <FormOutput task={task} attachments={attachments} canEditForm={canEditForm} onReload={load} />
           <AttachmentsSection taskId={task.id} attachments={attachments} canEdit={canEditTask} onReload={load} />
-          <NotesSection taskId={task.id} notes={notes} members={members} onReload={load} />
+          <NotesSection taskId={task.id} notes={notes} attachments={attachments} members={members} onReload={load} />
         </div>
 
         <TaskRightPanel
           taskId={task.id}
+          task={task}
+          referenceableTasks={referenceableTasks}
           notes={referenceableNotes}
           tasks={referenceableTasks}
           comments={comments}
@@ -308,6 +311,8 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
 
 function TaskRightPanel({
   taskId,
+  task,
+  referenceableTasks,
   notes,
   tasks,
   comments,
@@ -317,6 +322,8 @@ function TaskRightPanel({
   onReload
 }: {
   taskId: string;
+  task: TaskView;
+  referenceableTasks: TaskView[];
   notes: Note[];
   tasks: TaskView[];
   comments: ThreadComment[];
@@ -338,6 +345,7 @@ function TaskRightPanel({
   }, [tab]);
   return (
     <aside className="task-right-panel">
+      <TaskContextMiniMap task={task} referenceableTasks={referenceableTasks} />
       <Tabs
         variant="panel"
         value={tab}
@@ -356,11 +364,116 @@ function TaskRightPanel({
   );
 }
 
+function TaskContextMiniMap({ task, referenceableTasks }: { task: TaskView; referenceableTasks: TaskView[] }) {
+  const parent = task.parentId ? referenceableTasks.find((row) => row.id === task.parentId) ?? null : null;
+  const children = referenceableTasks.filter((row) => row.parentId === task.id);
+  const childPreview = children;
+  const mapInnerWidth = 320;
+  const mapPad = 14;
+  const nodeTitleFontSize = childPreview.length >= 6 ? 10 : childPreview.length >= 3 ? 11 : 12;
+  const parentNode = { x: mapPad, y: 14, w: 112, h: 40 };
+  const currentNode = { x: Math.round((mapInnerWidth - 136) / 2), y: 86, w: 136, h: 48 };
+  const childNodeWidth = 92;
+  const childNodeHeight = 40;
+  const childX = mapInnerWidth - childNodeWidth - mapPad;
+  const childGapY = 44;
+  const childStartY = currentNode.y + 18;
+  const childPositions = childPreview.map((_, index) => ({ x: childX, y: childStartY + index * childGapY, w: childNodeWidth, h: childNodeHeight }));
+  const leafNode = { x: childX, y: currentNode.y + 22, w: childNodeWidth, h: childNodeHeight };
+  const visibleRects = [
+    parent ? parentNode : parentNode,
+    currentNode,
+    ...(childPreview.length ? childPositions : [leafNode])
+  ];
+  const bounds = visibleRects.reduce(
+    (acc, rect) => ({
+      minX: Math.min(acc.minX, rect.x),
+      minY: Math.min(acc.minY, rect.y),
+      maxX: Math.max(acc.maxX, rect.x + rect.w),
+      maxY: Math.max(acc.maxY, rect.y + rect.h)
+    }),
+    { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxX: 0, maxY: 0 }
+  );
+  const padding = 16;
+  const viewBox = `${bounds.minX - padding} ${bounds.minY - padding} ${bounds.maxX - bounds.minX + padding * 2} ${bounds.maxY - bounds.minY + padding * 2}`;
+  const mapPixelHeight = Math.max(166, bounds.maxY - bounds.minY + padding * 2);
+  const parentHasEdge = Boolean(parent);
+  const childHasEdge = childPreview.length > 0;
+  return (
+    <section className="panel task-context-minimap">
+      <div className="task-context-head">
+        <strong>관계/구조 맥락</strong>
+        <small>1-depth</small>
+      </div>
+      <div className="task-context-map" style={{ height: `${mapPixelHeight}px` }} role="img" aria-label="태스크 상하위 맥락 미니맵">
+        <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet">
+          <path
+            className={`task-context-edge ${parentHasEdge ? "solid" : "dashed"}`}
+            d={`M ${parentNode.x + parentNode.w} ${parentNode.y + parentNode.h / 2} C ${parentNode.x + parentNode.w + 28} ${parentNode.y + parentNode.h / 2}, ${currentNode.x - 24} ${currentNode.y + 12}, ${currentNode.x} ${currentNode.y + 12}`}
+          />
+          {childHasEdge
+            ? childPositions.map((pos, index) => (
+              <path
+                key={`edge-${index}`}
+                className="task-context-edge solid"
+                d={`M ${currentNode.x + currentNode.w} ${currentNode.y + currentNode.h / 2} C ${currentNode.x + currentNode.w + 22} ${currentNode.y + currentNode.h / 2 + 6}, ${pos.x - 14} ${pos.y + pos.h / 2 - 4}, ${pos.x} ${pos.y + pos.h / 2}`}
+              />
+            ))
+            : (
+              <path
+                className="task-context-edge dashed"
+                d={`M ${currentNode.x + currentNode.w} ${currentNode.y + currentNode.h / 2} C ${currentNode.x + currentNode.w + 22} ${currentNode.y + currentNode.h / 2 + 6}, ${leafNode.x - 14} ${leafNode.y + leafNode.h / 2 - 4}, ${leafNode.x} ${leafNode.y + leafNode.h / 2}`}
+              />
+            )}
+        </svg>
+        {parent ? (
+          <button
+            className="task-context-node rf-node parent"
+            style={{ left: parentNode.x, top: parentNode.y, width: parentNode.w, height: parentNode.h }}
+            onClick={() => go(`/tasks/${parent.id}`)}
+            title={parent.title}
+          >
+            <b style={{ fontSize: `${nodeTitleFontSize}px` }}>{parent.title}</b>
+          </button>
+        ) : (
+          <div className="task-context-empty parent" style={{ left: parentNode.x, top: parentNode.y, width: parentNode.w, height: parentNode.h }}>루트</div>
+        )}
+        <div className="task-context-node rf-node current" style={{ left: currentNode.x, top: currentNode.y, width: currentNode.w, height: currentNode.h }}>
+          <b style={{ fontSize: `${nodeTitleFontSize}px` }}>{task.title}</b>
+        </div>
+        {childPreview.length ? (
+          childPreview.map((child, index) => {
+            const pos = childPositions[index];
+            return (
+              <button
+                key={child.id}
+                className="task-context-node rf-node child"
+                style={{ left: pos.x, top: pos.y, width: pos.w, height: pos.h }}
+                onClick={() => go(`/tasks/${child.id}`)}
+                title={child.title}
+              >
+                <b style={{ fontSize: `${nodeTitleFontSize}px` }}>{child.title}</b>
+              </button>
+            );
+          })
+        ) : (
+          <div className="task-context-empty child" style={{ left: leafNode.x, top: leafNode.y, width: leafNode.w, height: leafNode.h }}>리프</div>
+        )}
+      </div>
+      <div className="task-context-summary">
+        <span>head {parent ? "1" : "0"}</span>
+        <span>tail {children.length}</span>
+      </div>
+    </section>
+  );
+}
+
 function SystemFieldsPanel({
   task,
   members,
   templates,
   referenceableTasks,
+  children,
   canEditTask,
   canApprove,
   childrenCount,
@@ -373,6 +486,7 @@ function SystemFieldsPanel({
   members: Member[];
   templates: Template[];
   referenceableTasks: TaskView[];
+  children: TaskView[];
   canEditTask: boolean;
   canApprove: boolean;
   childrenCount: number;
@@ -395,6 +509,7 @@ function SystemFieldsPanel({
   const [nextActionOpen, setNextActionOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
   const [fixedFieldsOpen, setFixedFieldsOpen] = useState(false);
+  const [selectedChildId, setSelectedChildId] = useState("");
   const shareRef = useRef<HTMLDivElement | null>(null);
   const nextActionRef = useRef<HTMLDivElement | null>(null);
   const typeRef = useRef<HTMLDivElement | null>(null);
@@ -510,6 +625,9 @@ function SystemFieldsPanel({
   useEffect(() => {
     setDecisionState(task.currentState);
   }, [task.currentState, task.id]);
+  useEffect(() => {
+    setSelectedChildId("");
+  }, [task.id]);
 
   useEffect(() => {
     if (!shareOpen) return;
@@ -563,70 +681,34 @@ function SystemFieldsPanel({
       {error && <p className="form-error">{error}</p>}
       {systemCollapsed ? null : (
         <>
-      <Meta label="상위 항목">
-        <Select
-          tone="inline"
-          value={task.parentId ?? ""}
-          onChange={(value) => void patchTask("parent", { parentId: value || null })}
-          options={[["", "루트"], ...referenceableTasks.filter((row) => row.id !== task.id).map((row) => [row.id, row.title] as [string, string])]}
-          disabled={!canEditTask}
-        />
-      </Meta>
-      <Meta label="템플릿">
-        <div className="template-inline-tools">
-          <Select
-            tone="inline"
-            value={task.templateId ?? ""}
-            onChange={(value) => void patchTask("template", { templateId: value || null })}
-            options={[["", "자유폼 유지"], ...templates.filter((template) => template.enabled || template.id === task.templateId).map((template) => [template.id, template.name] as [string, string])]}
-            disabled={!canEditTask}
-          />
-        </div>
-      </Meta>
-      <Meta label="태그">
-        <div className="task-tag-editor">
-          <div className="task-tag-list">
-            {task.tags.map((tag) => (
-              <button key={tag} type="button" className="task-tag-chip" onClick={() => void removeTag(tag)} disabled={!canEditTask}>
-                {tag} ×
-              </button>
-            ))}
-          </div>
-          <div className="template-save-row">
-            <input
-              value={tagInput}
-              onChange={(event) => setTagInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void addTag();
-                }
-              }}
-              placeholder="태그 입력 후 Enter"
+      <div className="task-system-top-row">
+        <MetaWithHint label="템플릿" hint="작성 스키마를 정합니다. 필드 구조와 검토 기준, 워크플로우 규칙의 기준점입니다.">
+          <div className="template-inline-tools">
+            <Select
+              tone="inline"
+              value={task.templateId ?? ""}
+              onChange={(value) => void patchTask("template", { templateId: value || null })}
+              options={[["", "자유폼 유지"], ...templates.filter((template) => template.enabled || template.id === task.templateId).map((template) => [template.id, template.name] as [string, string])]}
               disabled={!canEditTask}
             />
-            <button type="button" className="button secondary" onClick={() => void addTag()} disabled={!canEditTask || !tagInput.trim()}>
-              태그 추가
-            </button>
           </div>
-        </div>
-      </Meta>
-      <Meta label="타입">
-        <div className="next-action-wrap" ref={typeRef}>
-          <button
-            className="state-action-trigger"
-            disabled={!canEditTask}
-            title={canEditTask ? "타입 선택" : "타입 수정 권한이 없습니다."}
-            onClick={() => setTypeOpen((prev) => !prev)}
-          >
-            <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
-            <i>{typeOpen ? "▴" : "▾"}</i>
-          </button>
-          {typeOpen && (
-            <div className="next-action-menu">
-              {templateTypes
-                .filter((value): value is TemplateType => value !== "ALL")
-                .map((value) => (
+        </MetaWithHint>
+        <MetaWithHint label="타입" hint="태스크의 의미 분류입니다. VISION/AXIS/OBJECTIVE/KEYRESULT/TASK 중 성격을 나타냅니다.">
+          <div className="next-action-wrap" ref={typeRef}>
+            <button
+              className="state-action-trigger"
+              disabled={!canEditTask}
+              title={canEditTask ? "타입 선택" : "타입 수정 권한이 없습니다."}
+              onClick={() => setTypeOpen((prev) => !prev)}
+            >
+              <Badge tone={templateTone(task.templateType)}>{templateLabel(task.templateType)}</Badge>
+              <i>{typeOpen ? "▴" : "▾"}</i>
+            </button>
+            {typeOpen && (
+              <div className="next-action-menu">
+                {templateTypes
+                  .filter((value): value is TemplateType => value !== "ALL")
+                  .map((value) => (
                   <button
                     key={value}
                     className={`next-action-item ${task.templateType === value ? "active" : ""}`}
@@ -637,7 +719,82 @@ function SystemFieldsPanel({
                   >
                     <strong><Badge tone={TEMPLATE_META[value].tone}>{TEMPLATE_META[value].label}</Badge></strong>
                   </button>
-                ))}
+                  ))}
+              </div>
+            )}
+          </div>
+        </MetaWithHint>
+        <MetaWithHint label="상위 항목" hint="현재 태스크가 속한 부모를 지정합니다. 구조상 소속과 컨텍스트를 결정합니다.">
+          <Select
+            tone="inline"
+            value={task.parentId ?? ""}
+            onChange={(value) => void patchTask("parent", { parentId: value || null })}
+            options={[["", "루트"], ...referenceableTasks.filter((row) => row.id !== task.id).map((row) => [row.id, row.title] as [string, string])]}
+            disabled={!canEditTask}
+          />
+        </MetaWithHint>
+        <MetaWithHint label="하위 항목" hint="현재 태스크가 포함하는 자식 목록입니다. 선택하면 해당 하위 태스크로 이동합니다.">
+          <Select
+            tone="inline"
+            value={selectedChildId}
+            onChange={(value) => {
+              setSelectedChildId(value);
+              if (value) go(`/tasks/${value}`);
+            }}
+            options={[
+              ["", children.length ? "하위 항목 보기" : "하위 항목 없음"],
+              ...children.map((row) => [row.id, row.title] as [string, string])
+            ]}
+            disabled={!children.length}
+          />
+        </MetaWithHint>
+      </div>
+      <Meta label="상태">
+        <div className="next-action-wrap" ref={nextActionRef}>
+          <button
+            className="state-action-trigger"
+            disabled={!canEditTask}
+            title={canEditTask ? "상태 및 다음 액션" : "상태 수정 권한이 없습니다."}
+            onClick={() => setNextActionOpen((prev) => !prev)}
+          >
+            <Badge tone={STATE_META[decisionState].tone}>{STATE_META[decisionState].label}</Badge>
+            <i>{nextActionOpen ? "▴" : "▾"}</i>
+          </button>
+          {nextActionOpen && (
+            <div className="next-action-menu">
+              <div className="next-action-head">상태</div>
+              {(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"] as TaskState[]).map((state) => (
+                <button
+                  key={state}
+                  className={`next-action-item ${decisionState === state ? "active" : ""}`}
+                  onClick={() => setDecisionState(state)}
+                >
+                  <strong>{STATE_META[state].label}</strong>
+                  {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[state]) && (
+                    <small>{transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[state])?.hasPolicy ? "승인게이트 · 정책연결" : "승인게이트 · 정책미지정"}</small>
+                  )}
+                </button>
+              ))}
+              <div className="next-action-head">넥스트 액션</div>
+              {nextActions.length === 0 && <p className="muted">선택한 상태에서 가능한 액션이 없습니다.</p>}
+              {nextActions.map((action) => (
+                <button
+                  key={`${action.toState}-${action.title}`}
+                  className={`next-action-item tone-${action.tone}`}
+                  onClick={() => {
+                    onOpenDecision(action);
+                    setNextActionOpen(false);
+                  }}
+                >
+                  <strong>{action.title}</strong>
+                  <small>
+                    {STATE_META[action.toState].label}로 전환
+                    {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[action.toState])
+                      ? ` · ${transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[action.toState])?.hasPolicy ? "승인게이트(정책연결)" : "승인게이트(정책미지정)"}`
+                      : ""}
+                  </small>
+                </button>
+              ))}
             </div>
           )}
         </div>
@@ -708,56 +865,36 @@ function SystemFieldsPanel({
           disabled={!canEditTask}
         />
       </Meta>
-      <Meta label="상태">
-        <div className="next-action-wrap" ref={nextActionRef}>
-          <button
-            className="state-action-trigger"
-            disabled={!canEditTask}
-            title={canEditTask ? "상태 및 다음 액션" : "상태 수정 권한이 없습니다."}
-            onClick={() => setNextActionOpen((prev) => !prev)}
-          >
-            <Badge tone={STATE_META[decisionState].tone}>{STATE_META[decisionState].label}</Badge>
-            <i>{nextActionOpen ? "▴" : "▾"}</i>
-          </button>
-          {nextActionOpen && (
-            <div className="next-action-menu">
-              <div className="next-action-head">상태</div>
-              {(["DRAFT", "IN_PROGRESS", "DONE", "CANCELED"] as TaskState[]).map((state) => (
-                <button
-                  key={state}
-                  className={`next-action-item ${decisionState === state ? "active" : ""}`}
-                  onClick={() => setDecisionState(state)}
-                >
-                  <strong>{STATE_META[state].label}</strong>
-                  {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[state]) && (
-                    <small>{transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[state])?.hasPolicy ? "승인게이트 · 정책연결" : "승인게이트 · 정책미지정"}</small>
-                  )}
-                </button>
-              ))}
-              <div className="next-action-head">넥스트 액션</div>
-              {nextActions.length === 0 && <p className="muted">선택한 상태에서 가능한 액션이 없습니다.</p>}
-              {nextActions.map((action) => (
-                <button
-                  key={`${action.toState}-${action.title}`}
-                  className={`next-action-item tone-${action.tone}`}
-                  onClick={() => {
-                    onOpenDecision(action);
-                    setNextActionOpen(false);
-                  }}
-                >
-                  <strong>{action.title}</strong>
-                  <small>
-                    {STATE_META[action.toState].label}로 전환
-                    {transitionGateTargets.has(LEGACY_STATE_TO_STATUS_ID[action.toState])
-                      ? ` · ${transitionGateTargets.get(LEGACY_STATE_TO_STATUS_ID[action.toState])?.hasPolicy ? "승인게이트(정책연결)" : "승인게이트(정책미지정)"}`
-                      : ""}
-                  </small>
+      <div className="task-tag-full-row">
+        <Meta label="태그">
+          <div className="task-tag-editor">
+            <div className="task-tag-list">
+              {task.tags.map((tag) => (
+                <button key={tag} type="button" className="task-tag-chip" onClick={() => void removeTag(tag)} disabled={!canEditTask}>
+                  {tag} ×
                 </button>
               ))}
             </div>
-          )}
-        </div>
-      </Meta>
+            <div className="template-save-row">
+              <input
+                value={tagInput}
+                onChange={(event) => setTagInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addTag();
+                  }
+                }}
+                placeholder="태그 입력 후 Enter"
+                disabled={!canEditTask}
+              />
+              <button type="button" className="button secondary" onClick={() => void addTag()} disabled={!canEditTask || !tagInput.trim()}>
+                태그 추가
+              </button>
+            </div>
+          </div>
+        </Meta>
+      </div>
       <div className="task-system-more" ref={moreMenuRef}>
         <button type="button" className="button secondary more-icon-btn" onClick={() => setMoreMenuOpen((prev) => !prev)} aria-label="더보기">
           ⋯
@@ -820,7 +957,19 @@ function SystemFieldsPanel({
   );
 }
 
-function NotesSection({ taskId, notes, members, onReload }: { taskId: string; notes: Note[]; members: Member[]; onReload: () => Promise<void> }) {
+function NotesSection({
+  taskId,
+  notes,
+  attachments,
+  members,
+  onReload
+}: {
+  taskId: string;
+  notes: Note[];
+  attachments: TaskAttachment[];
+  members: Member[];
+  onReload: () => Promise<void>;
+}) {
   const [open, setOpen] = useState<Set<string>>(() => {
     const stored = window.localStorage.getItem(`task-notes-open:${taskId}`);
     if (stored) return new Set(stored.split(",").filter(Boolean));
@@ -830,7 +979,10 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
   const [createOpen, setCreateOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const attachmentsById = useMemo(() => new Map(attachments.map((attachment) => [attachment.id, attachment])), [attachments]);
 
   useEffect(() => {
     window.localStorage.setItem(`task-notes-open:${taskId}`, [...open].join(","));
@@ -844,9 +996,11 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
     try {
       setCreating(true);
       setError(null);
-      await request(`/api/tasks/${taskId}/notes`, { method: "POST", body: JSON.stringify({ title, content }) });
+      await request(`/api/tasks/${taskId}/notes`, { method: "POST", body: JSON.stringify({ title, content, tags }) });
       setTitle("");
       setContent("");
+      setTags([]);
+      setTagInput("");
       setCreateOpen(false);
       await onReload();
     } catch (err) {
@@ -859,6 +1013,13 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
       setCreating(false);
     }
   };
+  const addCreateTag = () => {
+    const value = tagInput.trim();
+    if (!value || tags.includes(value)) return;
+    setTags((prev) => [...prev, value]);
+    setTagInput("");
+  };
+  const removeCreateTag = (value: string) => setTags((prev) => prev.filter((tag) => tag !== value));
 
   return (
 	    <section className="panel">
@@ -867,7 +1028,38 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
 	      {createOpen && (
         <div className="note-create">
           <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="노트 제목" maxLength={120} />
-          <textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="핵심 맥락이나 결정 근거를 작성하세요" rows={4} maxLength={5000} />
+          <DescriptionRichEditor
+            taskId={taskId}
+            value={content}
+            onChange={setContent}
+            attachmentsById={attachmentsById}
+            onReload={onReload}
+          />
+          <div className="note-tag-editor">
+            <div className="task-tag-list">
+              {tags.map((tag) => (
+                <button key={tag} type="button" className="task-tag-chip" onClick={() => removeCreateTag(tag)}>
+                  {tag} ×
+                </button>
+              ))}
+            </div>
+            <div className="template-save-row">
+              <input
+                value={tagInput}
+                onChange={(event) => setTagInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    addCreateTag();
+                  }
+                }}
+                placeholder="노트 태그 입력 후 Enter (예: 제안, 기준문서반영완료)"
+              />
+              <button type="button" className="button secondary" onClick={addCreateTag} disabled={!tagInput.trim()}>
+                태그 추가
+              </button>
+            </div>
+          </div>
           {error && <p className="form-error">{error}</p>}
           <div className="row-actions">
             <button className="button secondary" onClick={() => setCreateOpen(false)}>취소</button>
@@ -880,6 +1072,8 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
           <NoteCard
             key={note.id}
             note={note}
+            taskId={taskId}
+            attachmentsById={attachmentsById}
             author={memberName(members, note.lastEditorId)}
             open={open.has(note.id)}
             creating={creating}
@@ -931,6 +1125,8 @@ function NotesSection({ taskId, notes, members, onReload }: { taskId: string; no
 
 function NoteCard({
   note,
+  taskId,
+  attachmentsById,
   author,
   open,
   creating,
@@ -939,45 +1135,125 @@ function NoteCard({
 	  onDelete
 	}: {
 	  note: Note;
+	  taskId: string;
+	  attachmentsById: Map<string, TaskAttachment>;
 	  author: string;
 	  open: boolean;
 	  creating: boolean;
 	  onToggle: () => void;
-	  onSave: (patch: { title?: string; content?: string }) => Promise<void>;
+	  onSave: (patch: { title?: string; content?: string; tags?: string[] }) => Promise<void>;
 	  onDelete: () => Promise<void>;
 	}) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(note.title);
   const [content, setContent] = useState(note.content);
+  const [tags, setTags] = useState<string[]>(note.tags ?? []);
+  const [tagInput, setTagInput] = useState("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setTitle(note.title);
     setContent(note.content);
-  }, [note.content, note.title]);
+    setTags(note.tags ?? []);
+    setTagInput("");
+  }, [note.content, note.title, note.tags]);
+  const addTag = () => {
+    const value = tagInput.trim();
+    if (!value || tags.includes(value)) return;
+    setTags((prev) => [...prev, value]);
+    setTagInput("");
+  };
+  const removeTag = (value: string) => setTags((prev) => prev.filter((tag) => tag !== value));
+  const previewText = note.content.replace(/\s+/g, " ").trim();
+  const copyNoteLink = async () => {
+    const url = `${window.location.origin}/tasks/${taskId}?note=${note.id}`;
+    try {
+      await window.navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  };
 
   return (
     <div className="note-card">
-      <button className="note-head" onClick={onToggle}>
-        <span>{open ? "−" : "+"}</span>
-        <strong>{note.title}</strong>
-        <small>{author} · {elapsed(note.updatedAt)}</small>
-      </button>
+      <div className="note-head-wrap">
+        <button className="note-head" onClick={onToggle}>
+          <div className="note-head-title-row">
+            <span>{open ? "−" : "+"}</span>
+            <strong>{note.title}</strong>
+            <small className="note-head-meta inline">{author} · {elapsed(note.updatedAt)}</small>
+          </div>
+          {!open && (
+          <div className="note-head-summary-row">
+            <small className="note-head-preview">{previewText || "내용 없음"}</small>
+            <small className="note-head-meta">{author} · {elapsed(note.updatedAt)}</small>
+          </div>
+          )}
+          {note.tags?.length > 0 && (
+            <div className="task-tag-list note-tag-list compact">
+              {note.tags.map((tag) => <span key={tag} className="task-tag-chip">{tag}</span>)}
+            </div>
+          )}
+        </button>
+        <button
+          type="button"
+          className={`note-share-button ${copied ? "copied" : ""}`}
+          title={copied ? "링크 복사됨" : "노트 링크 복사"}
+          aria-label="노트 링크 복사"
+          onClick={() => void copyNoteLink()}
+        >
+          {copied ? "✓" : "🔗"}
+        </button>
+      </div>
       {open && (
         <div className="note-body">
           {editing ? (
             <>
               <input value={title} onChange={(e) => setTitle(e.target.value)} />
-              <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={6} />
+              <DescriptionRichEditor
+                taskId={taskId}
+                value={content}
+                onChange={setContent}
+                attachmentsById={attachmentsById}
+                onReload={async () => {}}
+              />
+              <div className="note-tag-editor">
+                <div className="task-tag-list">
+                  {tags.map((tag) => (
+                    <button key={tag} type="button" className="task-tag-chip" onClick={() => removeTag(tag)}>
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="template-save-row">
+                  <input
+                    value={tagInput}
+                    onChange={(event) => setTagInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addTag();
+                      }
+                    }}
+                    placeholder="노트 태그 입력 후 Enter"
+                  />
+                  <button type="button" className="button secondary" onClick={addTag} disabled={!tagInput.trim()}>
+                    태그 추가
+                  </button>
+                </div>
+              </div>
               <div className="row-actions">
                 <button className="button secondary" onClick={() => setEditing(false)}>취소</button>
                 <button className="button primary" disabled={creating} onClick={() => {
-                  void onSave({ title, content }).then(() => setEditing(false));
+                  void onSave({ title, content, tags }).then(() => setEditing(false));
                 }}>저장</button>
               </div>
             </>
           ) : (
             <>
-              <p>{note.content}</p>
+              <div className="markdown-preview">{renderMarkdownBlock(note.content, attachmentsById)}</div>
               {note.attachments.length > 0 && (
                 <div className="file-list">
                   {note.attachments.map((file) => <span key={file}>{file}</span>)}
@@ -1118,6 +1394,7 @@ function ThreadPanel({
           const prevDate = prev ? new Date(prev.createdAt).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" }) : null;
           const showDateDivider = index === 0 || currentDate !== prevDate;
           const canManage = comment.authorId === me.id || me.role === "ADMIN";
+          const parsedComment = splitThreadTitleAndBody(comment.content);
           return (
             <div key={comment.id}>
               {showDateDivider && <div className="thread-day-divider"><span>{currentDate}</span></div>}
@@ -1149,7 +1426,14 @@ function ThreadPanel({
                   </>
                 ) : (
                   <>
-                    <p>{comment.content}</p>
+                    {parsedComment.title ? (
+                      <div className="thread-comment-content">
+                        <h4>{parsedComment.title}</h4>
+                        <p>{parsedComment.body}</p>
+                      </div>
+                    ) : (
+                      <p>{comment.content}</p>
+                    )}
                     {comment.referencedNoteIds.length > 0 && (
                       <div className="ref-list">
                         {comment.referencedNoteIds.map((id) => <span key={id}>#{notes.find((note) => note.id === id)?.title ?? "노트"}</span>)}
@@ -1201,6 +1485,311 @@ function mentionKey(mention: Mention) {
   return `${mention.type}-${mention.targetId}-${mention.fieldKey ?? ""}`;
 }
 
+function splitThreadTitleAndBody(content: string) {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const [firstLine, ...rest] = normalized.split("\n");
+  const titleCandidate = firstLine.trim();
+  if (!rest.length || !titleCandidate || titleCandidate.length > 200) {
+    return { title: null as string | null, body: normalized };
+  }
+  const body = rest.join("\n").trim();
+  if (!body) return { title: null as string | null, body: normalized };
+  return { title: titleCandidate, body };
+}
+
+function renderMarkdownInline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|`([^`]+)`|\*\*([^*]+)\*\*|_([^_]+)_)/g;
+  let lastIndex = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    if (match[2] && match[3]) {
+      nodes.push(<a key={`md-link-${key++}`} href={match[3]} target="_blank" rel="noreferrer">{match[2]}</a>);
+    } else if (match[4]) {
+      nodes.push(<code key={`md-code-${key++}`}>{match[4]}</code>);
+    } else if (match[5]) {
+      nodes.push(<strong key={`md-strong-${key++}`}>{match[5]}</strong>);
+    } else if (match[6]) {
+      nodes.push(<em key={`md-em-${key++}`}>{match[6]}</em>);
+    }
+    lastIndex = pattern.lastIndex;
+  }
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes.length ? nodes : [text];
+}
+
+function resolveAttachmentSource(raw: string, attachmentsById: Map<string, TaskAttachment>) {
+  if (!raw.startsWith("attachment://")) return raw;
+  const attachmentId = raw.slice("attachment://".length);
+  const attachment = attachmentsById.get(attachmentId);
+  if (!attachment) return "";
+  return attachment.kind === "FILE" ? attachment.contentDataUrl ?? "" : attachment.url ?? "";
+}
+
+function renderMarkdownBlock(value: string, attachmentsById: Map<string, TaskAttachment>) {
+  const lines = value.split("\n");
+  const blocks: ReactNode[] = [];
+  let listItems: string[] = [];
+  let orderedItems: string[] = [];
+  let checkItems: Array<{ checked: boolean; text: string }> = [];
+  let codeLines: string[] = [];
+  let inCodeBlock = false;
+
+  const flushLists = (seed: number) => {
+    let nextSeed = seed;
+    if (listItems.length) {
+      blocks.push(
+        <ul key={`md-ul-${nextSeed++}`}>
+          {listItems.map((item, index) => <li key={`md-ul-item-${index}`}>{renderMarkdownInline(item)}</li>)}
+        </ul>
+      );
+      listItems = [];
+    }
+    if (orderedItems.length) {
+      blocks.push(
+        <ol key={`md-ol-${nextSeed++}`}>
+          {orderedItems.map((item, index) => <li key={`md-ol-item-${index}`}>{renderMarkdownInline(item)}</li>)}
+        </ol>
+      );
+      orderedItems = [];
+    }
+    if (checkItems.length) {
+      blocks.push(
+        <ul className="md-check-list" key={`md-check-${nextSeed++}`}>
+          {checkItems.map((item, index) => (
+            <li key={`md-check-item-${index}`}>
+              <input type="checkbox" checked={item.checked} readOnly />
+              <span>{renderMarkdownInline(item.text)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+      checkItems = [];
+    }
+    return nextSeed;
+  };
+
+  let blockKey = 0;
+  lines.forEach((line) => {
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    const image = line.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+    const check = line.match(/^\s*-\s+\[( |x|X)\]\s+(.+)$/);
+    const quote = line.match(/^\s*>\s+(.+)$/);
+    const fenced = line.trim() === "```";
+    if (fenced) {
+      blockKey = flushLists(blockKey);
+      if (inCodeBlock) {
+        blocks.push(<pre key={`md-pre-${blockKey++}`}><code>{codeLines.join("\n")}</code></pre>);
+        codeLines = [];
+      }
+      inCodeBlock = !inCodeBlock;
+      return;
+    }
+    if (inCodeBlock) {
+      codeLines.push(line);
+      return;
+    }
+    if (check) {
+      checkItems.push({ checked: check[1].toLowerCase() === "x", text: check[2] });
+      return;
+    }
+    if (bullet) {
+      listItems.push(bullet[1]);
+      return;
+    }
+    if (ordered) {
+      orderedItems.push(ordered[1]);
+      return;
+    }
+    blockKey = flushLists(blockKey);
+    if (!line.trim()) {
+      blocks.push(<div key={`md-space-${blockKey++}`} className="md-space" />);
+      return;
+    }
+    if (heading) {
+      const content = renderMarkdownInline(heading[2]);
+      if (heading[1].length === 1) blocks.push(<h3 key={`md-h1-${blockKey++}`}>{content}</h3>);
+      else if (heading[1].length === 2) blocks.push(<h4 key={`md-h2-${blockKey++}`}>{content}</h4>);
+      else blocks.push(<h5 key={`md-h3-${blockKey++}`}>{content}</h5>);
+      return;
+    }
+    if (image) {
+      const src = resolveAttachmentSource(image[2], attachmentsById);
+      if (src) {
+        blocks.push(
+          <figure key={`md-image-${blockKey++}`} className="markdown-image">
+            <img src={src} alt={image[1] || "붙여넣은 이미지"} />
+            {image[1] ? <figcaption>{image[1]}</figcaption> : null}
+          </figure>
+        );
+      } else {
+        blocks.push(<p key={`md-image-missing-${blockKey++}`} className="muted">첨부 이미지를 찾을 수 없습니다.</p>);
+      }
+      return;
+    }
+    if (quote) {
+      blocks.push(<blockquote key={`md-quote-${blockKey++}`}>{renderMarkdownInline(quote[1])}</blockquote>);
+      return;
+    }
+    blocks.push(<p key={`md-p-${blockKey++}`}>{renderMarkdownInline(line)}</p>);
+  });
+  blockKey = flushLists(blockKey);
+  if (codeLines.length) blocks.push(<pre key={`md-pre-last-${blockKey++}`}><code>{codeLines.join("\n")}</code></pre>);
+  return blocks.length ? blocks : [<p key="md-empty">내용이 없습니다.</p>];
+}
+
+function DescriptionRichEditor({
+  taskId,
+  value,
+  onChange,
+  attachmentsById,
+  onReload
+}: {
+  taskId: string;
+  value: string;
+  onChange: (value: string) => void;
+  attachmentsById: Map<string, TaskAttachment>;
+  onReload: () => Promise<void>;
+}) {
+  const [preview, setPreview] = useState(false);
+  const [pasteBusy, setPasteBusy] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const wrapSelection = (prefix: string, suffix = prefix, placeholder = "텍스트") => {
+    const textarea = editorRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const selected = value.slice(start, end) || placeholder;
+    const next = `${value.slice(0, start)}${prefix}${selected}${suffix}${value.slice(end)}`;
+    onChange(next);
+    window.setTimeout(() => {
+      textarea.focus();
+      const cursorStart = start + prefix.length;
+      textarea.setSelectionRange(cursorStart, cursorStart + selected.length);
+    }, 0);
+  };
+
+  const insertLinePrefix = (prefix: string, placeholder: string) => {
+    const textarea = editorRef.current;
+    if (!textarea) return;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? 0;
+    const selected = value.slice(start, end) || placeholder;
+    const transformed = selected
+      .split("\n")
+      .map((line) => line.trim() ? `${prefix}${line}` : prefix.trimEnd())
+      .join("\n");
+    const next = `${value.slice(0, start)}${transformed}${value.slice(end)}`;
+    onChange(next);
+    window.setTimeout(() => textarea.focus(), 0);
+  };
+
+  const uploadPastedImages = async (files: File[]) => {
+    if (!files.length) return;
+    try {
+      setPasteBusy(true);
+      setPasteError(null);
+      const snippets: string[] = [];
+      for (const file of files) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result ?? ""));
+          reader.onerror = () => reject(new Error("클립보드 이미지 읽기에 실패했습니다."));
+          reader.readAsDataURL(file);
+        });
+        const attachment = await request<TaskAttachment>(`/api/tasks/${taskId}/attachments/file`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: file.name || `pasted-image-${Date.now()}.png`,
+            mimeType: file.type || "image/png",
+            size: file.size,
+            contentDataUrl: dataUrl
+          })
+        });
+        snippets.push(`![${attachment.name}](attachment://${attachment.id})`);
+      }
+      const next = `${value}${value.endsWith("\n") || !value ? "" : "\n"}${snippets.join("\n")}`;
+      onChange(next);
+      await onReload();
+    } catch (err) {
+      setPasteError(err instanceof Error ? err.message : "클립보드 이미지 첨부에 실패했습니다.");
+    } finally {
+      setPasteBusy(false);
+    }
+  };
+
+  const onPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData.items ?? []);
+    const imageFiles = items
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+    if (!imageFiles.length) return;
+    event.preventDefault();
+    void uploadPastedImages(imageFiles);
+  };
+
+  return (
+    <div className="description-rich-editor">
+      <div className="description-editor-toolbar">
+        <button type="button" className="text-button" onClick={() => wrapSelection("**")} title="굵게 (Ctrl/Cmd+B)">B</button>
+        <button type="button" className="text-button" onClick={() => wrapSelection("_")} title="기울임">I</button>
+        <button type="button" className="text-button" onClick={() => wrapSelection("`")} title="인라인 코드">{"</>"}</button>
+        <button type="button" className="text-button" onClick={() => insertLinePrefix("# ", "제목")} title="제목">H</button>
+        <button type="button" className="text-button" onClick={() => insertLinePrefix("- ", "리스트 항목")} title="불릿 리스트">•</button>
+        <button type="button" className="text-button" onClick={() => insertLinePrefix("- [ ] ", "체크 항목")} title="체크리스트">☑</button>
+        <button type="button" className="text-button" onClick={() => insertLinePrefix("> ", "인용문")} title="인용">❝</button>
+        <button type="button" className="text-button" onClick={() => wrapSelection("[", "](https://)", "링크 텍스트")} title="링크">🔗</button>
+        <button type="button" className={`text-button ${preview ? "active" : ""}`} onClick={() => setPreview((prev) => !prev)}>
+          {preview ? "편집" : "미리보기"}
+        </button>
+      </div>
+      {pasteBusy && <p className="muted">클립보드 이미지를 첨부하는 중입니다...</p>}
+      {pasteError && <p className="form-error">{pasteError}</p>}
+      {preview ? (
+        <div className="markdown-preview">{renderMarkdownBlock(value, attachmentsById)}</div>
+      ) : (
+        <textarea
+          ref={editorRef}
+          value={value}
+          placeholder="핵심 맥락과 배경을 구조적으로 작성하세요. (Markdown 지원)"
+          maxLength={1200}
+          rows={10}
+          className="rich-text-field markdown-input"
+          onChange={(event) => onChange(event.target.value)}
+          onPaste={onPaste}
+        />
+      )}
+    </div>
+  );
+}
+
+type FreeformBlockType = "TEXT" | "LONG_TEXT" | "CHECKLIST" | "QUOTE" | "NUMBER";
+
+const FREEFORM_BLOCK_TYPES: Array<{ type: FreeformBlockType; label: string; placeholder: string; multiline?: boolean }> = [
+  { type: "TEXT", label: "텍스트", placeholder: "한 줄 텍스트" },
+  { type: "LONG_TEXT", label: "긴 글", placeholder: "여러 줄 설명", multiline: true },
+  { type: "CHECKLIST", label: "체크리스트", placeholder: "- [ ] 할 일", multiline: true },
+  { type: "QUOTE", label: "인용", placeholder: "> 인용 문장", multiline: true },
+  { type: "NUMBER", label: "숫자", placeholder: "숫자 값" }
+];
+
+function freeformBlockMeta(key: string) {
+  if (key.startsWith("blk:")) {
+    const [, typeRaw, idRaw] = key.split(":");
+    const type = (typeRaw as FreeformBlockType) || "TEXT";
+    const spec = FREEFORM_BLOCK_TYPES.find((row) => row.type === type) ?? FREEFORM_BLOCK_TYPES[0];
+    return { type: spec.type, label: spec.label, id: idRaw || key };
+  }
+  return { type: "TEXT" as FreeformBlockType, label: key, id: key };
+}
+
 function MentionComposer({
   value,
   onChange,
@@ -1234,6 +1823,19 @@ function MentionComposer({
     .slice(0, 6);
   const selectedNotes = notes.filter((note) => refs.has(note.id));
 
+  const extractSharedNoteIds = (text: string) => {
+    const noteIds = new Set<string>();
+    const queryMatches = text.matchAll(/[?&]note=([a-zA-Z0-9-]+)/g);
+    for (const match of queryMatches) {
+      if (match[1]) noteIds.add(match[1]);
+    }
+    const hashMatches = text.matchAll(/#note=([a-zA-Z0-9-]+)/g);
+    for (const match of hashMatches) {
+      if (match[1]) noteIds.add(match[1]);
+    }
+    return [...noteIds];
+  };
+
   const replaceCommand = (token: string) => {
     const next = command ? `${value.slice(0, command.index ?? 0)}${command[1]}${token} ` : `${value}${token} `;
     onChange(next);
@@ -1261,10 +1863,27 @@ function MentionComposer({
   const removeMention = (target: Mention) => {
     onMentionsChange(mentions.filter((mention) => mentionKey(mention) !== mentionKey(target)));
   };
+  const onPaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = event.clipboardData.getData("text");
+    if (!pasted) return;
+    const matchedIds = extractSharedNoteIds(pasted);
+    if (!matchedIds.length) return;
+    const matchedNotes = matchedIds
+      .map((id) => notes.find((note) => note.id === id))
+      .filter((note): note is Note => Boolean(note));
+    if (!matchedNotes.length) return;
+    event.preventDefault();
+    const nextRefs = new Set(refs);
+    matchedNotes.forEach((note) => nextRefs.add(note.id));
+    onRefsChange(nextRefs);
+    const tokens = matchedNotes.map((note) => `#${note.title}`).join(" ");
+    const nextValue = `${value}${value && !value.endsWith(" ") ? " " : ""}${tokens} `;
+    onChange(nextValue);
+  };
 
   return (
     <div className="mention-composer">
-      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={2000} placeholder={placeholder} />
+      <textarea ref={textareaRef} value={value} onChange={(event) => onChange(event.target.value)} onPaste={onPaste} rows={4} maxLength={2000} placeholder={placeholder} />
       {commandType && (
         <div className="mention-command-menu">
           <div className="mention-command-head">
@@ -1297,8 +1916,20 @@ function MentionComposer({
   );
 }
 
-function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditForm: boolean; onReload: () => Promise<void> }) {
+function FormOutput({
+  task,
+  attachments,
+  canEditForm,
+  onReload
+}: {
+  task: TaskView;
+  attachments: TaskAttachment[];
+  canEditForm: boolean;
+  onReload: () => Promise<void>;
+}) {
   const fields = (task.template?.formDefinition ?? []).filter((field) => field.type !== "FILE");
+  const isFreeformForm = fields.length === 0;
+  const attachmentsById = useMemo(() => new Map(attachments.map((attachment) => [attachment.id, attachment])), [attachments]);
   const entries = [
     [TASK_DESCRIPTION_FIELD_KEY, task.description ?? ""] as [string, string],
     ...(fields.length
@@ -1308,6 +1939,7 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
   const [editing, setEditing] = useState(false);
   const [rows, setRows] = useState(() => entries.length ? entries : [["", ""]]);
   const [error, setError] = useState<string | null>(null);
+  const [blockMenuOpen, setBlockMenuOpen] = useState(false);
 
   useEffect(() => {
     const nextEntries = [
@@ -1344,6 +1976,13 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
     }
   };
 
+  const addFreeformBlock = (type: FreeformBlockType) => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const key = `blk:${type}:${id}`;
+    setRows((prev) => [...prev, [key, ""]]);
+    setBlockMenuOpen(false);
+  };
+
   return (
     <section className="panel">
       <PanelHeader
@@ -1363,39 +2002,94 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
         <div className="form-output-editor">
           {rows.map(([key, value], index) => {
             const field = fields.find((row) => row.key === key);
+            const blockMeta = freeformBlockMeta(key);
             return (
-            <div className="form-output-row" key={`${key}-${index}`}>
-              <input
-                value={key}
-                placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : field?.label ?? "필드"}
-                maxLength={80}
-                readOnly={Boolean(field) || key === TASK_DESCRIPTION_FIELD_KEY}
-                onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}
-              />
-              {field?.type === "LONG_TEXT" || key === TASK_DESCRIPTION_FIELD_KEY ? (
-                <textarea
-                  value={value}
-                  placeholder={key === TASK_DESCRIPTION_FIELD_KEY ? "핵심 맥락과 배경을 구조적으로 작성하세요" : field?.helpText ?? "값"}
-                  maxLength={key === TASK_DESCRIPTION_FIELD_KEY ? 1200 : 1000}
-                  rows={key === TASK_DESCRIPTION_FIELD_KEY ? 8 : 3}
-                  className={key === TASK_DESCRIPTION_FIELD_KEY ? "rich-text-field" : undefined}
-                  onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
-                />
-              ) : (
-                <input
-                  value={value}
-                  placeholder={field?.helpText ?? "값"}
-                  maxLength={1000}
-                  onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
-                />
-              )}
-              {!field && key !== TASK_DESCRIPTION_FIELD_KEY && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
-            </div>
-          );
+              <div className={`form-output-row ${isFreeformForm && key !== TASK_DESCRIPTION_FIELD_KEY ? "freeform-block-row" : ""}`} key={`${key}-${index}`}>
+                {key === TASK_DESCRIPTION_FIELD_KEY ? (
+                  <>
+                    <input value={key} placeholder="태스크 설명" maxLength={80} readOnly />
+                    <DescriptionRichEditor
+                      taskId={task.id}
+                      value={value}
+                      onChange={(nextValue) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], nextValue] : row))}
+                      attachmentsById={attachmentsById}
+                      onReload={onReload}
+                    />
+                  </>
+                ) : isFreeformForm ? (
+                  <>
+                    <div className="freeform-block-head">
+                      <small>{blockMeta.label} 블록</small>
+                      <button className="text-button danger-text" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>
+                    </div>
+                    {(blockMeta.type === "LONG_TEXT" || blockMeta.type === "CHECKLIST" || blockMeta.type === "QUOTE") ? (
+                      <textarea
+                        value={value}
+                        placeholder={FREEFORM_BLOCK_TYPES.find((row) => row.type === blockMeta.type)?.placeholder ?? "값"}
+                        maxLength={2000}
+                        rows={blockMeta.type === "LONG_TEXT" ? 4 : 3}
+                        onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                      />
+                    ) : (
+                      <input
+                        value={value}
+                        placeholder={FREEFORM_BLOCK_TYPES.find((row) => row.type === blockMeta.type)?.placeholder ?? "값"}
+                        maxLength={1000}
+                        inputMode={blockMeta.type === "NUMBER" ? "decimal" : undefined}
+                        onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={key}
+                      placeholder={field?.label ?? "필드"}
+                      maxLength={80}
+                      readOnly={Boolean(field)}
+                      onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [event.target.value, row[1]] : row))}
+                    />
+                    {field?.type === "LONG_TEXT" ? (
+                      <textarea
+                        value={value}
+                        placeholder={field?.helpText ?? "값"}
+                        maxLength={1000}
+                        rows={3}
+                        onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                      />
+                    ) : (
+                      <input
+                        value={value}
+                        placeholder={field?.helpText ?? "값"}
+                        maxLength={1000}
+                        onChange={(event) => setRows((prev) => prev.map((row, rowIndex) => rowIndex === index ? [row[0], event.target.value] : row))}
+                      />
+                    )}
+                    {!field && <button className="button secondary" onClick={() => setRows((prev) => prev.filter((_, rowIndex) => rowIndex !== index))}>삭제</button>}
+                  </>
+                )}
+              </div>
+            );
           })}
           {error && <p className="form-error">{error}</p>}
           <div className="row-actions">
-            {!fields.length && <button className="button secondary" onClick={() => setRows((prev) => [...prev, ["", ""]])}>필드 추가</button>}
+            {isFreeformForm && (
+              <div className="freeform-block-add-wrap">
+                <button className="freeform-block-add-button" type="button" onClick={() => setBlockMenuOpen((prev) => !prev)}>
+                  + 블록 추가
+                </button>
+                {blockMenuOpen && (
+                  <div className="freeform-block-menu">
+                    {FREEFORM_BLOCK_TYPES.map((spec) => (
+                      <button key={spec.type} type="button" onClick={() => addFreeformBlock(spec.type)}>
+                        <strong>{spec.label}</strong>
+                        <small>{spec.placeholder}</small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <button className="button primary" onClick={() => void save()}>산출물 저장</button>
           </div>
         </div>
@@ -1403,10 +2097,12 @@ function FormOutput({ task, canEditForm, onReload }: { task: TaskView; canEditFo
         <div className="kv-grid">
           {entries.length ? entries.map(([key, value]) => (
             <div key={key}>
-              <small>{key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : fields.find((field) => field.key === key)?.label ?? key}</small>
-              <strong className={key === TASK_DESCRIPTION_FIELD_KEY ? "rich-text-preview" : undefined}>
-                {value}
-              </strong>
+              <small>{key === TASK_DESCRIPTION_FIELD_KEY ? "태스크 설명" : (isFreeformForm ? freeformBlockMeta(key).label : fields.find((field) => field.key === key)?.label ?? key)}</small>
+              {key === TASK_DESCRIPTION_FIELD_KEY ? (
+                <div className="rich-text-preview markdown-preview">{renderMarkdownBlock(value, attachmentsById)}</div>
+              ) : (
+                <strong>{value}</strong>
+              )}
             </div>
           )) : <p className="muted">입력된 양식 값이 없습니다</p>}
         </div>

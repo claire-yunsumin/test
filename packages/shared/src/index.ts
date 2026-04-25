@@ -63,6 +63,7 @@ export type Note = {
   taskId: string;
   title: string;
   content: string;
+  tags: string[];
   authorId: string;
   lastEditorId: string;
   attachments: string[];
@@ -1207,6 +1208,7 @@ export function createSeedData(): AppData {
       taskId: "task-marketing-strategy",
       title: "배경 및 결정 질문",
       content: "기존 리드의 전환율은 높지만 진입 메시지가 기능 나열에 치우쳐 있습니다. 이번 결정은 ICP, 메시지, 승인 기준을 한 번에 고정하는 것을 목표로 합니다.",
+      tags: ["제안", "검토중"],
       authorId: "u-pm",
       lastEditorId: "u-pm",
       attachments: ["Q3-market-brief.pdf"],
@@ -1218,6 +1220,7 @@ export function createSeedData(): AppData {
       taskId: "task-marketing-strategy",
       title: "분석 요약",
       content: "제조 엔터프라이즈는 도입 리스크를 낮추는 근거를 먼저 요구합니다. 메시지는 생산성보다 검증 가능성과 운영 안정성에 가까울 때 반응이 좋았습니다.",
+      tags: ["기준문서", "검증근거"],
       authorId: "u-marketing",
       lastEditorId: "u-marketing",
       attachments: ["segment-matrix.xlsx"],
@@ -1229,6 +1232,7 @@ export function createSeedData(): AppData {
       taskId: "task-marketing-strategy",
       title: "결정 사항 초안",
       content: "1차 ICP는 제조 엔터프라이즈 운영혁신팀으로 두고, 메시지는 '현장 데이터를 의사결정 가능한 운영 지표로 전환'에 집중합니다.",
+      tags: ["결정초안"],
       authorId: "u-pm",
       lastEditorId: "u-pm",
       attachments: [],
@@ -1240,6 +1244,7 @@ export function createSeedData(): AppData {
       taskId: "task-target-research",
       title: "시장 세분화 계획",
       content: "구매 주체, 현장 사용자, 승인권자를 분리해서 인터뷰 질문지를 운영합니다.",
+      tags: ["제안"],
       authorId: "u-marketing",
       lastEditorId: "u-marketing",
       attachments: [],

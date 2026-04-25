@@ -48,6 +48,20 @@ export function Meta({ label, children }: { label: string; children: ReactNode }
   );
 }
 
+export function MetaWithHint({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
+  return (
+    <div className="meta-row">
+      <small className="meta-label-with-hint">
+        <span>{label}</span>
+        <button type="button" className="meta-hint-icon" title={hint} aria-label={`${label} 도움말`}>
+          ?
+        </button>
+      </small>
+      <strong>{children}</strong>
+    </div>
+  );
+}
+
 export function Badge({ tone, children }: { tone: string; children: ReactNode }) {
   return <span className={`badge tone-${tone}`}>{children}</span>;
 }

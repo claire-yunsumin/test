@@ -60,11 +60,30 @@ apps/web/src/
 - 좌측: 시스템 필드, 소유자, 우선순위, 기한, 담당자/참관자, 하위 항목/노트/스레드/파일 수
 - 중앙: 노트, Form Output, 검수 기준
 - 우측: `TaskRightPanel` (`TaskDetailPage.tsx`)
+  - 상단 `관계/구조 맥락` 1-depth 미니맵(상/하위 노드 클릭 이동, head/tail 요약)
   - `논의` 탭: 댓글, 멘션, 노트 참조, 커맨드형 composer
   - `변경 기록` 탭: 이벤트 로그, 세션 묶음, 전체 펼침/접기
 - 하단: 결정 액션 바
 
 우측 탭은 `rt=timeline` query로 상태가 유지됩니다.
+
+### 리치 편집기/블록 편집
+
+- `__task_description`은 마크다운 리치에디터(`DescriptionRichEditor`)를 사용합니다.
+  - 툴바: bold/italic/code/heading/list/checklist/quote/link
+  - 미리보기 렌더링 지원
+  - 클립보드 이미지 붙여넣기 시 첨부 API 업로드 후 `attachment://` 참조 토큰 삽입
+- Form Output 자유폼(템플릿 미적용)은 블록형 편집 UI를 사용합니다.
+  - 하단 점선 `+ 블록 추가` 버튼
+  - 컨텍스트 메뉴에서 블록 타입(TEXT/LONG_TEXT/CHECKLIST/QUOTE/NUMBER) 선택 후 카드형 블록 생성
+  - 템플릿 기반 Form Output은 기존 고정 필드 편집 방식 유지
+
+### 노트 UX
+
+- 노트 생성/수정 본문은 태스크 설명과 동일한 리치에디터를 재사용합니다.
+- 노트 태그 라벨을 생성/수정/조회에서 관리합니다.
+- 접힌 노트 헤더는 제목 1줄 + 내용 요약 1줄 + 작성자/시간 + 태그 라벨을 표시합니다.
+- 노트별 공유 아이콘(hover/focus 노출)으로 링크 복사가 가능하며, 복사된 노트 링크를 스레드 입력창에 붙여넣으면 `#노트` 참조로 자동 변환됩니다.
 
 ## 공통 UI 컴포넌트
 

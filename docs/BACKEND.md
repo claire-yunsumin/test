@@ -49,7 +49,7 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - Workspace: `Unit`, `Folder`, `TaskList`
 - Work Graph: `Task.parentId`, `structureState`, `templateId`
 - 실행 분류: `workflowPhase`, `phaseOverride`, `workflowStatusId`
-- 협업: `Note`, `ThreadComment`, `Mention`
+- 협업: `Note`(title/content/tags), `ThreadComment`, `Mention`
 - 기록: `TimelineEvent`, `InboxItem`, `EngagementEvent`
 - 정책: `Template`, `ApprovalPolicy`, `NotificationSettings`, `WebPushSubscription`
 
@@ -73,6 +73,8 @@ MEMBER < OWNER < ADMIN < SUPER_ADMIN
 - 노트 참조와 멘션 검증
 - FREEFORM 노드 생성과 parent 연결
 - Template 적용과 Form field 초기화
+- 레거시 FILE/`__task_files` 필드 제거 및 저장 시 재유입 방지
+- 노트 생성/수정에서 태그(`tags`) 저장과 조회 반영
 - retention analytics 계산
 - unit/folder/list 관련 CRUD 스모크 경로
 

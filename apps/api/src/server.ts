@@ -905,12 +905,17 @@ app.post("/api/tasks/:taskId/notes", (req, res) => {
   if (!requireRole(req, res, "MEMBER")) return;
   const task = getVisibleTask(req, res, req.params.taskId);
   if (!task) return;
-  const body = z.object({ title: text(1, 120), content: text(0, 5000).default("") }).parse(req.body);
+  const body = z.object({
+    title: text(1, 120),
+    content: text(0, 5000).default(""),
+    tags: z.array(text(1, 30)).max(12).default([])
+  }).parse(req.body);
   const note: Note = {
     id: `note-${crypto.randomUUID()}`,
     taskId: task.id,
     title: body.title,
     content: body.content,
+    tags: body.tags,
     authorId: meId(req),
     lastEditorId: meId(req),
     attachments: [],
@@ -936,7 +941,11 @@ app.patch("/api/notes/:noteId", (req, res) => {
   const note = byId(data.notes, req.params.noteId);
   if (!note) return res.status(404).json({ error: "NOTE_NOT_FOUND", requestId: req.requestId });
   if (!getVisibleTask(req, res, note.taskId)) return;
-  const body = z.object({ title: optionalText(120), content: optionalText(5000) }).parse(req.body);
+  const body = z.object({
+    title: optionalText(120),
+    content: optionalText(5000),
+    tags: z.array(text(1, 30)).max(12).optional()
+  }).parse(req.body);
   Object.assign(note, body, { lastEditorId: meId(req), updatedAt: now() });
   addEngagement({ type: "NOTE_UPDATED", actorId: meId(req), taskId: note.taskId, targetId: note.id, metadata: { afterMention: referencingCommentExists(note.id) } });
 
