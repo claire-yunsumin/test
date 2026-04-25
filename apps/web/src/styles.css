@@ -4142,10 +4142,14 @@ body {
   color: #0f172a;
 }
 
-.app-shell,
-.app-shell.gnb-expanded {
+/* 3-column: GNB rail | Explorer(context) | workspace. 펼침 시 GNB만 넓힌다. */
+.app-shell {
   grid-template-columns: 56px 252px minmax(0, 1fr);
   background: #eef1f5;
+}
+
+.app-shell.gnb-expanded {
+  grid-template-columns: minmax(200px, 220px) 252px minmax(0, 1fr);
 }
 
 .gnb-sidebar {
@@ -4190,10 +4194,17 @@ body {
   border-radius: var(--radius-control);
 }
 
+/* 기본은 아이콘 레일. 펼침에서는 아래에서 다시 켠다(라벨 복원). */
 .nav-label,
 .gnb-search-label,
 .gnb-profile-copy {
-  display: none !important;
+  display: none;
+}
+
+.gnb-sidebar.expanded .nav-label,
+.gnb-sidebar.expanded .gnb-search-label,
+.gnb-sidebar.expanded .gnb-profile-copy {
+  display: inline !important;
 }
 
 .gnb-search,
@@ -4365,6 +4376,389 @@ body {
 .loop-step span {
   color: #64748b;
   font-size: 10px;
+  font-weight: 700;
+}
+
+.teams-current {
+  gap: 8px;
+}
+
+.current-team-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.current-team-row > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.context-current .current-team-row strong {
+  font-size: 15px;
+}
+
+.context-current .current-team-row em {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-avatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #c7d2fe;
+  border-radius: 7px;
+  background: linear-gradient(180deg, #eef2ff 0%, #dbeafe 100%);
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.teams-section {
+  padding: 8px;
+}
+
+.teams-tree,
+.team-block,
+.channel-list,
+.channel-group {
+  display: grid;
+  gap: 4px;
+}
+
+.team-block {
+  padding-top: 3px;
+}
+
+.team-row,
+.channel-row {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: #334155;
+  text-align: left;
+}
+
+.team-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto 20px 20px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px;
+}
+
+.team-row.global-team {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
+
+.team-copy,
+.channel-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.team-copy strong,
+.channel-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-copy small,
+.channel-copy small {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.team-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.team-meta i {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.team-row em,
+.channel-row em {
+  color: #64748b;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.team-toggle {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-control);
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.team-toggle:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.favorite-toggle {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-control);
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.favorite-toggle:hover {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.favorite-toggle.active {
+  color: #b45309;
+}
+
+.team-row:hover,
+.channel-row:hover,
+.team-row.active,
+.channel-row.active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.team-row.active .team-copy strong,
+.channel-row.active .channel-copy strong,
+.team-row:hover .team-copy strong,
+.channel-row:hover .channel-copy strong {
+  color: #1d4ed8;
+}
+
+.team-row.active .team-avatar,
+.team-row:hover .team-avatar {
+  border-color: #93c5fd;
+  background: #dbeafe;
+}
+
+.channel-list {
+  margin-left: 15px;
+  padding-left: 12px;
+  border-left: 1px solid #d8e0ec;
+}
+
+.channel-group {
+  gap: 3px;
+  padding-top: 4px;
+}
+
+.channel-group > small {
+  padding: 5px 4px 2px;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.channel-group.folder-group > small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.channel-group.folder-group > small::before {
+  content: "";
+  width: 9px;
+  height: 6px;
+  border: 1px solid #94a3b8;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.channel-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto 20px;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+}
+
+.channel-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 950;
+}
+
+/* #는 노트 커맨드(#)와 혼동되므로, Explorer의 리스트는「라인」아이콘, 유닛 범위는「사각 경계」아이콘 */
+.channel-icon.workspace-surface-icon {
+  font-size: 0;
+  line-height: 0;
+  font-weight: 400;
+}
+
+.channel-icon.workspace-surface-icon--unit::before {
+  content: "";
+  display: block;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  opacity: 0.9;
+}
+
+.channel-icon.workspace-surface-icon--list::before {
+  content: "";
+  display: block;
+  width: 10px;
+  height: 7px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 10px 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 2.8px / 10px 1.5px no-repeat,
+    linear-gradient(currentColor, currentColor) 0 5.5px / 7px 1.5px no-repeat;
+  opacity: 0.85;
+}
+
+.channel-row.active .channel-icon,
+.channel-row:hover .channel-icon {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.favorites-section {
+  gap: 5px;
+}
+
+.favorite-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto auto 20px;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: #334155;
+  padding: 6px;
+  text-align: left;
+}
+
+.favorite-row:hover,
+.favorite-row.active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.favorite-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 9px;
+}
+
+.favorite-channel-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.favorite-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.favorite-copy strong,
+.favorite-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.favorite-copy strong {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.favorite-copy small {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.favorite-row i {
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.favorite-row em {
+  color: #64748b;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.favorite-empty {
+  margin: 0;
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-control);
+  background: #f8fafc;
+  color: #64748b;
+  padding: 8px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -4913,9 +5307,12 @@ textarea,
 }
 
 @media (max-width: 1180px) {
-  .app-shell,
-  .app-shell.gnb-expanded {
+  .app-shell {
     grid-template-columns: 56px minmax(0, 1fr);
+  }
+
+  .app-shell.gnb-expanded {
+    grid-template-columns: minmax(200px, 220px) minmax(0, 1fr);
   }
 
   .context-sidebar {
@@ -4962,4 +5359,410 @@ textarea,
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
+}
+
+/* File explorer sidebar pass: one-line browsing tree. */
+.explorer-sidebar {
+  gap: 6px;
+  padding: 8px;
+  background: #f7f9fc;
+}
+
+.explorer-sidebar .context-card,
+.explorer-sidebar .context-section {
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.explorer-sidebar .context-current {
+  gap: 5px;
+  padding: 6px 7px 8px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.explorer-sidebar .context-current > small {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.explorer-sidebar .current-team-row {
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.explorer-sidebar .current-team-row .team-avatar {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 8px;
+}
+
+.explorer-sidebar .context-current .current-team-row strong {
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.explorer-sidebar .context-current .current-team-row em {
+  font-size: 10px;
+}
+
+.explorer-sidebar .context-section {
+  gap: 2px;
+  padding: 5px 0;
+}
+
+.explorer-sidebar .context-section + .context-section {
+  border-top: 1px solid #e8edf4;
+}
+
+.explorer-sidebar .context-section-head {
+  min-height: 22px;
+  padding: 2px 7px 3px;
+  border-bottom: 0;
+}
+
+.explorer-sidebar .context-section-head span {
+  color: #64748b;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.explorer-sidebar .context-section-head b {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.explorer-sidebar .team-row,
+.explorer-sidebar .channel-row,
+.explorer-sidebar .favorite-row {
+  min-height: 24px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  padding: 2px 5px;
+}
+
+.explorer-sidebar .team-row {
+  position: relative;
+  grid-template-columns: 16px minmax(0, 1fr) auto 18px;
+  gap: 5px;
+}
+
+.explorer-sidebar .team-row.global-team {
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+}
+
+.explorer-sidebar .channel-row {
+  grid-template-columns: 16px minmax(0, 1fr) auto 16px;
+  gap: 5px;
+  padding-left: 4px;
+}
+
+.explorer-sidebar .favorite-row {
+  grid-template-columns: 16px minmax(0, 1fr) auto auto 16px;
+  gap: 5px;
+}
+
+.explorer-sidebar .team-avatar,
+.explorer-sidebar .channel-icon,
+.explorer-sidebar .favorite-avatar,
+.explorer-sidebar .favorite-channel-icon {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 3px;
+  background: #edf2f7;
+  color: #64748b;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.explorer-sidebar .team-avatar {
+  position: relative;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0;
+}
+
+.explorer-sidebar .team-avatar::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 5px;
+  width: 12px;
+  height: 8px;
+  border: 1px solid #93c5fd;
+  border-radius: 2px;
+  background: #bfdbfe;
+}
+
+.explorer-sidebar .team-avatar::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 6px;
+  height: 3px;
+  border: 1px solid #93c5fd;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  background: #dbeafe;
+}
+
+.explorer-sidebar .channel-icon,
+.explorer-sidebar .favorite-channel-icon {
+  background: transparent;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.explorer-sidebar .team-copy,
+.explorer-sidebar .channel-copy,
+.explorer-sidebar .favorite-copy {
+  display: block;
+  min-width: 0;
+}
+
+.explorer-sidebar .team-copy strong,
+.explorer-sidebar .channel-copy strong,
+.explorer-sidebar .favorite-copy strong {
+  display: block;
+  overflow: hidden;
+  color: #1f2937;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-sidebar .team-copy small,
+.explorer-sidebar .channel-copy small,
+.explorer-sidebar .favorite-copy small {
+  display: none;
+}
+
+.explorer-sidebar .team-meta {
+  gap: 3px;
+}
+
+.explorer-sidebar .team-meta i,
+.explorer-sidebar .favorite-row i {
+  min-width: 14px;
+  height: 14px;
+  font-size: 8px;
+}
+
+.explorer-sidebar .team-row em,
+.explorer-sidebar .channel-row em,
+.explorer-sidebar .favorite-row em {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.explorer-sidebar .team-toggle,
+.explorer-sidebar .favorite-toggle,
+.explorer-sidebar .team-add-folder,
+.explorer-sidebar .team-add-list {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  padding: 0;
+  opacity: 0.62;
+  font-size: 11px;
+}
+
+.explorer-sidebar .favorite-toggle {
+  color: #94a3b8;
+}
+
+.explorer-sidebar .favorite-toggle.active {
+  color: #b45309;
+  opacity: 1;
+}
+
+.explorer-sidebar .team-add-folder {
+  color: #1f2937;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+
+.explorer-sidebar .team-add-list {
+  color: #475569;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+}
+
+.explorer-sidebar .team-add-folder.disabled,
+.explorer-sidebar .team-add-list.disabled {
+  opacity: 0.32;
+  pointer-events: none;
+}
+
+.explorer-sidebar .unit-row-actions {
+  position: relative;
+}
+
+.explorer-sidebar .team-menu-trigger {
+  width: 18px;
+  height: 16px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #64748b;
+  padding: 0;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.explorer-sidebar .team-menu-trigger:hover {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.explorer-sidebar .team-actions-menu {
+  position: absolute;
+  right: 0;
+  top: 18px;
+  z-index: 20;
+  min-width: 124px;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #d7dee9;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.explorer-sidebar .team-actions-menu button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 5px 6px;
+  border-radius: 4px;
+  color: #334155;
+  font-size: 11px;
+}
+
+.explorer-sidebar .team-actions-menu button:hover {
+  background: #eef2ff;
+}
+
+.explorer-sidebar .team-actions-menu button:disabled {
+  opacity: 0.45;
+}
+
+.explorer-sidebar .team-row:hover,
+.explorer-sidebar .channel-row:hover,
+.explorer-sidebar .favorite-row:hover {
+  background: #edf2f7;
+}
+
+.explorer-sidebar .team-row.active,
+.explorer-sidebar .channel-row.active,
+.explorer-sidebar .favorite-row.active {
+  border-color: transparent;
+  background: #dbeafe;
+}
+
+.explorer-sidebar .team-row.active .team-copy strong,
+.explorer-sidebar .channel-row.active .channel-copy strong,
+.explorer-sidebar .favorite-row.active .favorite-copy strong {
+  color: #1d4ed8;
+}
+
+.explorer-sidebar .channel-list {
+  margin-left: 8px;
+  padding-left: 10px;
+  border-left: 1px solid #d7dee9;
+  gap: 1px;
+}
+
+.explorer-sidebar .channel-group {
+  gap: 1px;
+  padding-top: 2px;
+}
+
+.explorer-sidebar .channel-group > small {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 2px 4px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.explorer-sidebar .channel-group > small::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 2px;
+  background: #f1f5f9;
+}
+
+.explorer-sidebar .favorites-section {
+  gap: 1px;
+}
+
+.explorer-sidebar .favorite-empty {
+  margin: 0 6px;
+  border-radius: 3px;
+  padding: 6px;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.explorer-sidebar .loop-section {
+  gap: 2px;
+}
+
+.explorer-sidebar .loop-step {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 5px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.explorer-sidebar .loop-step:hover {
+  background: #edf2f7;
+}
+
+.explorer-sidebar .loop-step i {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 8px;
+}
+
+.explorer-sidebar .loop-step strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-sidebar .loop-step span {
+  font-size: 9px;
 }

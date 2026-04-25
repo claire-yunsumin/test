@@ -78,6 +78,7 @@ docs/
 - 인증은 `X-Demo-User-Id` 헤더 기반입니다.
 - 역할은 `MEMBER < OWNER < ADMIN < SUPER_ADMIN` 순서입니다.
 - 태스크는 `unitId`, `folderId`, `listId`, `bucketId`, `parentId` 맥락을 가집니다.
+- 좌측 `Shell`의 Explorer는 Unit·Folder·List를 트리로 보여 주며(팀/채널 UI는 **IA 참고**), List 행에 채널의 `#` 표기는 쓰지 않습니다(스레드의 `#` 노트 커맨드와 구분).
 - Work Graph는 `FREEFORM` 형상화와 `TEMPLATED` 정형화를 구분합니다.
 - Template은 `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema`를 가집니다.
 - 스레드는 입력 중 `@` 또는 `#` 커맨드 검색으로 멘션/노트 참조를 선택합니다.

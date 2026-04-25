@@ -110,6 +110,7 @@ export function App() {
       onSelectUnit={setUnit}
       onSelectList={setList}
       onNavigate={go}
+      onReload={reload}
     >
       {route.path.startsWith("/tasks/") && route.taskId ? (
         <TaskWorkspace taskId={route.taskId} me={data.me} templates={data.templates} onReload={reload} />

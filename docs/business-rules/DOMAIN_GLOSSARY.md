@@ -43,6 +43,8 @@ Unit 안에서 List를 묶는 문맥입니다. 태스크의 `folderId`는 해당
 
 태스크가 실제로 배치되는 작업 목록입니다. `unitId`, 선택적 `folderId`, 선택적 기본 workflow phase를 가집니다.
 
+UI의 Explorer에서 List는 팀즈의 "채널"과 비슷한 **자리**를 차지하지만, 제품 용어는 List이며 `#` 접두어는 사용하지 않습니다(`#`는 스레드에서 노트 참조 커맨드로 예약).
+
 ### Bucket
 
 계층이나 상태가 아니라 실행 큐를 나누는 운영 축입니다. 예: 우선 처리, 버그 수정, 아이디어, 대기.
@@ -226,6 +228,10 @@ Inbox 항목의 운영 분류입니다.
 별도 저장소가 아니라 tasks, notes, comments, timeline, mentions, referencedNoteIds를 프론트에서 그래프 노드/엣지로 투영한 뷰입니다.
 
 ## 화면 용어
+
+### Shell / Explorer
+
+`layout/Shell`이 제공하는 좌측 영역입니다. GNB(알림함·태스크·설정 등)와 그 옆의 **워크스페이스 Explorer**로 구성되며, Unit → Folder → List 트리를 보여 줍니다. 팀즈의 팀/채널 화면은 정보 구조를 잡기 위한 **참고 IA**이고, 구현과 용어는 본 문서의 Unit/Folder/List를 따릅니다.
 
 ### Task View
 

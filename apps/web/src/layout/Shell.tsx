@@ -1,8 +1,10 @@
-import { ReactNode, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useState } from "react";
 import { STATE_META, type AppData, type Folder, type Member, type TaskList, type Unit, type UnitMember } from "@hwe/shared";
 import { go } from "../lib/router";
 import type { TaskView } from "../lib/viewTypes";
 import { profileDisplayName, roleLabel, templateLabel } from "../lib/domain";
+import { WorkspaceListScopeIcon } from "../components/WorkspaceSurfaceIcons";
+import { request } from "../lib/api";
 
 function headerBreadcrumb(route: string, taskId: string | undefined, tasks: TaskView[]) {
   const task = taskId ? tasks.find((row) => row.id === taskId) : null;
@@ -27,6 +29,29 @@ function headerBreadcrumb(route: string, taskId: string | undefined, tasks: Task
   return [{ label: "태스크", path: "/tasks" }];
 }
 
+function teamInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1))
+    .join("")
+    .toUpperCase();
+}
+
+const SIDEBAR_FAVORITES_KEY = "hwe-sidebar-favorites-v1";
+const GNB_EXPANDED_KEY = "hwe-gnb-expanded-v1";
+
+function readSidebarFavorites() {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_FAVORITES_KEY);
+    const rows = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(rows) ? rows.filter((row): row is string => typeof row === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
 export function Shell({
   route,
   taskId,
@@ -42,6 +67,7 @@ export function Shell({
   onSelectUnit,
   onSelectList,
   onNavigate,
+  onReload,
   children
 }: {
   route: string;
@@ -58,13 +84,25 @@ export function Shell({
   onSelectUnit: (unitId: string) => void;
   onSelectList: (listId: string) => void;
   onNavigate: (path: string) => void;
+  onReload: () => Promise<void>;
   children: ReactNode;
 }) {
   const unread = inbox.filter((item) => item.userId === me.id && !item.readAt).length;
   const breadcrumbs = headerBreadcrumb(route, taskId, tasks);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [gnbExpanded, setGnbExpanded] = useState(false);
+  const [creatingFolderUnitId, setCreatingFolderUnitId] = useState<string | null>(null);
+  const [creatingListUnitId, setCreatingListUnitId] = useState<string | null>(null);
+  const [openUnitMenuId, setOpenUnitMenuId] = useState<string | null>(null);
+  const [gnbExpanded, setGnbExpanded] = useState(() => {
+    try {
+      return window.localStorage.getItem(GNB_EXPANDED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [globalQuery, setGlobalQuery] = useState("");
+  const [openTeamIds, setOpenTeamIds] = useState<Set<string>>(() => new Set(units.map((unit) => unit.id)));
+  const [favoriteKeys, setFavoriteKeys] = useState<Set<string>>(readSidebarFavorites);
   const unitRoleLabel = useMemo(() => {
     if (!selectedUnitId) return me.role === "ADMIN" ? "전역 관리자" : "전역 참여자";
     const row = unitMembers.find((member) => member.unitId === selectedUnitId && member.memberId === me.id);
@@ -75,6 +113,107 @@ export function Shell({
   }, [me.id, me.role, selectedUnitId, unitMembers]);
   const activeUnit = units.find((unit) => unit.id === selectedUnitId);
   const activeWorkspaceValue = selectedListId ? `list:${selectedListId}` : selectedUnitId ? `unit:${selectedUnitId}` : "global";
+  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const unitById = useMemo(() => new Map(units.map((unit) => [unit.id, unit])), [units]);
+  const listById = useMemo(() => new Map(lists.map((list) => [list.id, list])), [lists]);
+  const folderById = useMemo(() => new Map(folders.map((folder) => [folder.id, folder])), [folders]);
+  const unreadByUnit = useMemo(() => {
+    const map = new Map<string, number>();
+    inbox.forEach((item) => {
+      if (item.userId !== me.id || item.readAt) return;
+      const task = taskById.get(item.taskId);
+      if (!task?.unitId) return;
+      map.set(task.unitId, (map.get(task.unitId) ?? 0) + 1);
+    });
+    return map;
+  }, [inbox, me.id, taskById]);
+  const unreadByList = useMemo(() => {
+    const map = new Map<string, number>();
+    inbox.forEach((item) => {
+      if (item.userId !== me.id || item.readAt) return;
+      const task = taskById.get(item.taskId);
+      if (!task?.listId) return;
+      map.set(task.listId, (map.get(task.listId) ?? 0) + 1);
+    });
+    return map;
+  }, [inbox, me.id, taskById]);
+  useEffect(() => {
+    if (!selectedUnitId) return;
+    setOpenTeamIds((prev) => new Set(prev).add(selectedUnitId));
+  }, [selectedUnitId]);
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_FAVORITES_KEY, JSON.stringify([...favoriteKeys]));
+  }, [favoriteKeys]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GNB_EXPANDED_KEY, gnbExpanded ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [gnbExpanded]);
+  useEffect(() => {
+    if (!openUnitMenuId) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest(".unit-row-actions")) setOpenUnitMenuId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [openUnitMenuId]);
+  const toggleTeam = (unitId: string) => {
+    setOpenTeamIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(unitId)) next.delete(unitId);
+      else next.add(unitId);
+      return next;
+    });
+  };
+  const toggleFavorite = (key: string) => {
+    setFavoriteKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const favoriteItems = useMemo(() => [...favoriteKeys].map((key) => {
+    const [kind, id] = key.split(":");
+    if (kind === "unit") {
+      const unit = unitById.get(id);
+      if (!unit) return null;
+      return {
+        key,
+        kind: "team" as const,
+        title: unit.name,
+        subtitle: unit.purpose,
+        unread: unreadByUnit.get(unit.id) ?? 0,
+        active: selectedUnitId === unit.id && !selectedListId,
+        open: () => {
+          onSelectUnit(unit.id);
+          setOpenTeamIds((prev) => new Set(prev).add(unit.id));
+        }
+      };
+    }
+    if (kind === "list") {
+      const list = listById.get(id);
+      if (!list) return null;
+      const unit = unitById.get(list.unitId);
+      const folder = list.folderId ? folderById.get(list.folderId) : null;
+      return {
+        key,
+        kind: "list" as const,
+        title: list.name,
+        subtitle: `${unit?.name ?? "Unit"}${folder ? ` / ${folder.name}` : ""}`,
+        unread: unreadByList.get(list.id) ?? 0,
+        active: selectedListId === list.id,
+        open: () => {
+          onSelectList(list.id);
+          setOpenTeamIds((prev) => new Set(prev).add(list.unitId));
+        }
+      };
+    }
+    return null;
+  }).filter((item): item is NonNullable<typeof item> => Boolean(item)), [favoriteKeys, folderById, listById, onSelectList, onSelectUnit, selectedListId, selectedUnitId, tasks, unitById, unreadByList, unreadByUnit]);
   const globalResults = tasks
     .filter((task) => !globalQuery.trim() || `${task.title} ${task.description}`.toLowerCase().includes(globalQuery.toLowerCase()))
     .slice(0, 8);
@@ -106,9 +245,64 @@ export function Shell({
   const workspaceScopeLabel = selectedListId ? "리스트 단위" : selectedUnitId ? "유닛 단위" : "전사 단위";
   const activeList = lists.find((list) => list.id === selectedListId);
   const activeFolder = activeList ? folders.find((folder) => folder.id === activeList.folderId) : null;
-  const unitTaskCount = selectedUnitId ? tasks.filter((task) => task.unitId === selectedUnitId).length : tasks.length;
   const templatedCount = tasks.filter((task) => task.structureState === "TEMPLATED").length;
   const mentionReadyCount = tasks.filter((task) => task.activity.commentsCount > 0 || task.activity.notesCount > 0).length;
+  const createFolder = async (unit: Unit) => {
+    if (creatingFolderUnitId) return;
+    const rawName = window.prompt(`${unit.name}에 추가할 폴더 이름을 입력하세요.`);
+    const name = rawName?.trim();
+    if (!name) return;
+    try {
+      setCreatingFolderUnitId(unit.id);
+      await request("/api/folders", {
+        method: "POST",
+        body: JSON.stringify({ unitId: unit.id, name })
+      });
+      setOpenTeamIds((prev) => new Set(prev).add(unit.id));
+      await onReload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "폴더를 생성하지 못했습니다.";
+      window.alert(message);
+    } finally {
+      setCreatingFolderUnitId(null);
+    }
+  };
+  const createList = async (unit: Unit) => {
+    if (creatingListUnitId) return;
+    const rawName = window.prompt(`${unit.name}에 추가할 리스트 이름을 입력하세요.`);
+    const name = rawName?.trim();
+    if (!name) return;
+    const unitFolders = folders.filter((folder) => folder.unitId === unit.id);
+    let folderId: string | null = null;
+    if (unitFolders.length > 0) {
+      const folderHint = unitFolders.map((folder) => folder.name).join(", ");
+      const rawFolderName = window.prompt(`폴더에 넣으려면 폴더명을 입력하세요. (없으면 빈값)\n가능: ${folderHint}`);
+      const folderName = rawFolderName?.trim();
+      if (folderName) {
+        const matched = unitFolders.find((folder) => folder.name === folderName);
+        if (!matched) {
+          window.alert("입력한 폴더명을 찾을 수 없습니다. 다시 시도해 주세요.");
+          return;
+        }
+        folderId = matched.id;
+      }
+    }
+    try {
+      setCreatingListUnitId(unit.id);
+      await request("/api/lists", {
+        method: "POST",
+        body: JSON.stringify({ unitId: unit.id, folderId, name, defaultPhase: "BACKLOG" })
+      });
+      setOpenTeamIds((prev) => new Set(prev).add(unit.id));
+      await onReload();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "리스트를 생성하지 못했습니다.";
+      window.alert(message);
+    } finally {
+      setCreatingListUnitId(null);
+    }
+  };
+  const closeUnitMenu = () => setOpenUnitMenuId(null);
 
   return (
     <div className={`app-shell ${gnbExpanded ? "gnb-expanded" : ""}`}>
@@ -128,7 +322,13 @@ export function Shell({
               <span className="nav-mark">{link.mark}</span>
               <span className="nav-label">{link.label}</span>
               {link.path === "/inbox" && Number(link.unread ?? 0) > 0 && (
-                <span className="nav-unread-count">{Number(link.unread) > 99 ? "99+" : link.unread}</span>
+                gnbExpanded ? (
+                  <span className="nav-unread-count" aria-hidden>
+                    {Number(link.unread) > 99 ? "99+" : link.unread}
+                  </span>
+                ) : (
+                  <span className="nav-unread-dot" aria-label={`읽지 않은 알림 ${link.unread}개`} />
+                )
               )}
             </button>
           ))}
@@ -146,50 +346,219 @@ export function Shell({
             </div>
           </div>
         </section>
-        <button className="gnb-toggle" onClick={() => setGnbExpanded((prev) => !prev)} aria-label={gnbExpanded ? "메뉴 축소" : "메뉴 확장"}>
+        <button
+          className="gnb-toggle"
+          type="button"
+          onClick={() => setGnbExpanded((prev) => !prev)}
+          title={gnbExpanded ? "메뉴 축소" : "메뉴 확장(라벨 보기)"}
+          aria-label={gnbExpanded ? "메뉴 축소" : "메뉴 확장"}
+        >
           {gnbExpanded ? "‹" : "›"}
         </button>
       </aside>
-      <aside className="context-sidebar">
-        <section className="context-card context-current">
+      <aside className="context-sidebar explorer-sidebar">
+        <section className="context-card context-current teams-current">
           <small>{workspaceScopeLabel}</small>
-          <strong>{activeList?.name ?? workspaceUnitTitle}</strong>
-          <span>{activeFolder ? `${workspaceUnitTitle} / ${activeFolder.name}` : unitRoleLabel}</span>
-        </section>
-        <section className="context-section">
-          <div className="context-section-head">
-            <span>Workspace</span>
-            <b>{unitTaskCount}</b>
+          <div className="current-team-row">
+            <span className="team-avatar">{teamInitials(workspaceUnitTitle)}</span>
+            <span>
+              <strong>{activeList?.name ?? workspaceUnitTitle}</strong>
+              <em>{activeFolder ? `${workspaceUnitTitle} / ${activeFolder.name}` : unitRoleLabel}</em>
+            </span>
           </div>
-          <button className={`context-item ${activeWorkspaceValue === "global" ? "active" : ""}`} onClick={() => onSelectUnit("")}>
-            <span>전역 유닛 스페이스</span>
-            <em>{tasks.length}</em>
+        </section>
+        <section className="context-section favorites-section">
+          <div className="context-section-head">
+            <span>Favorites</span>
+            <b>{favoriteItems.length}</b>
+          </div>
+          {favoriteItems.length ? (
+            favoriteItems.map((item) => (
+              <button key={item.key} className={`favorite-row ${item.active ? "active" : ""}`} onClick={item.open}>
+                <span className={item.kind === "team" ? "team-avatar favorite-avatar" : "favorite-list-icon-wrap"}>
+                  {item.kind === "team" ? teamInitials(item.title) : <WorkspaceListScopeIcon className="favorite-channel-icon" />}
+                </span>
+                <span className="favorite-copy">
+                  <strong>{item.title}</strong>
+                  <small>{item.subtitle}</small>
+                </span>
+                {item.unread > 0 && <i>{item.unread}</i>}
+                <span
+                  className="favorite-toggle active"
+                  title="즐겨찾기 해제"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleFavorite(item.key);
+                  }}
+                >
+                  ★
+                </span>
+              </button>
+            ))
+          ) : (
+            <p className="favorite-empty">Unit 또는 List 행의 별을 눌러 고정하세요.</p>
+          )}
+        </section>
+        <section className="context-section teams-section">
+          <div className="context-section-head">
+            <span>워크스페이스</span>
+          </div>
+          <button className={`team-row global-team ${activeWorkspaceValue === "global" ? "active" : ""}`} onClick={() => onSelectUnit("")}>
+            <span className="team-avatar">G</span>
+            <span className="team-copy">
+              <strong>전역 유닛 스페이스</strong>
+              <small>전체 Unit·List를 가로지르는 전사 보기</small>
+            </span>
           </button>
-          <div className="context-tree">
+          <div className="teams-tree">
             {units.map((unit) => {
               const unitLists = lists.filter((list) => list.unitId === unit.id);
               const unitFolders = folders.filter((folder) => folder.unitId === unit.id);
-              const unitCount = tasks.filter((task) => task.unitId === unit.id).length;
+              const isOpen = openTeamIds.has(unit.id);
+              const unitUnread = unreadByUnit.get(unit.id) ?? 0;
               return (
-                <div className="context-unit" key={unit.id}>
-                  <button className={`context-item ${selectedUnitId === unit.id && !selectedListId ? "active" : ""}`} onClick={() => onSelectUnit(unit.id)}>
-                    <span>{unit.name}</span>
-                    <em>{unitCount}</em>
-                  </button>
-                  {unitFolders.map((folder) => {
-                    const folderLists = unitLists.filter((list) => list.folderId === folder.id);
-                    return (
-                      <div className="context-folder" key={folder.id}>
-                        <small>{folder.name}</small>
-                        {folderLists.map((list) => (
-                          <button key={list.id} className={`context-list-item ${selectedListId === list.id ? "active" : ""}`} onClick={() => onSelectList(list.id)}>
-                            <span>{list.name}</span>
-                            <em>{tasks.filter((task) => task.listId === list.id).length}</em>
+                <div className={`team-block ${isOpen ? "open" : ""}`} key={unit.id}>
+                  <div
+                    className={`team-row ${selectedUnitId === unit.id && !selectedListId ? "active" : ""}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      onSelectUnit(unit.id);
+                      setOpenTeamIds((prev) => new Set(prev).add(unit.id));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onSelectUnit(unit.id);
+                        setOpenTeamIds((prev) => new Set(prev).add(unit.id));
+                      }
+                    }}
+                  >
+                    <span className="team-avatar">{teamInitials(unit.name)}</span>
+                    <span className="team-copy">
+                      <strong>{unit.name}</strong>
+                      <small>{unit.purpose}</small>
+                    </span>
+                    <span className="team-meta">
+                      {unitUnread > 0 && <i>{unitUnread}</i>}
+                    </span>
+                    <span className="unit-row-actions">
+                      <button
+                        type="button"
+                        className="team-menu-trigger"
+                        aria-haspopup="menu"
+                        aria-expanded={openUnitMenuId === unit.id}
+                        title="유닛 작업"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenUnitMenuId((prev) => (prev === unit.id ? null : unit.id));
+                        }}
+                      >
+                        ...
+                      </button>
+                      {openUnitMenuId === unit.id && (
+                        <div className="team-actions-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              toggleFavorite(`unit:${unit.id}`);
+                              closeUnitMenu();
+                            }}
+                          >
+                            {favoriteKeys.has(`unit:${unit.id}`) ? "즐겨찾기 해제" : "즐겨찾기 추가"}
                           </button>
-                        ))}
-                      </div>
-                    );
-                  })}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={creatingFolderUnitId === unit.id}
+                            onClick={async () => {
+                              await createFolder(unit);
+                              closeUnitMenu();
+                            }}
+                          >
+                            폴더 추가
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={creatingListUnitId === unit.id}
+                            onClick={async () => {
+                              await createList(unit);
+                              closeUnitMenu();
+                            }}
+                          >
+                            리스트 추가
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              toggleTeam(unit.id);
+                              closeUnitMenu();
+                            }}
+                          >
+                            {isOpen ? "유닛 접기" : "유닛 펼치기"}
+                          </button>
+                        </div>
+                      )}
+                    </span>
+                  </div>
+                  {isOpen && (
+                    <div className="channel-list">
+                      {unitFolders.map((folder) => {
+                        const folderLists = unitLists.filter((list) => list.folderId === folder.id);
+                        return (
+                          <div className="channel-group folder-group" key={folder.id}>
+                            {folderLists.map((list) => {
+                              const listUnread = unreadByList.get(list.id) ?? 0;
+                              return (
+                                <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""}`} onClick={() => onSelectList(list.id)}>
+                                  <WorkspaceListScopeIcon title={list.name} />
+                                  <span className="channel-copy">
+                                    <strong>{list.name}</strong>
+                                    <small>{list.defaultPhase ?? "ACTIVE"} · {listUnread > 0 ? `${listUnread} unread` : "caught up"}</small>
+                                  </span>
+                                  <span
+                                    className={`favorite-toggle ${favoriteKeys.has(`list:${list.id}`) ? "active" : ""}`}
+                                    title={favoriteKeys.has(`list:${list.id}`) ? "즐겨찾기 해제" : "즐겨찾기"}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      toggleFavorite(`list:${list.id}`);
+                                    }}
+                                  >
+                                    {favoriteKeys.has(`list:${list.id}`) ? "★" : "☆"}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                      {unitLists.filter((list) => !list.folderId).map((list) => {
+                        const listUnread = unreadByList.get(list.id) ?? 0;
+                        return (
+                          <button key={list.id} className={`channel-row ${selectedListId === list.id ? "active" : ""}`} onClick={() => onSelectList(list.id)}>
+                            <WorkspaceListScopeIcon title={list.name} />
+                            <span className="channel-copy">
+                              <strong>{list.name}</strong>
+                              <small>{list.defaultPhase ?? "ACTIVE"} · {listUnread > 0 ? `${listUnread} unread` : "caught up"}</small>
+                            </span>
+                            <span
+                              className={`favorite-toggle ${favoriteKeys.has(`list:${list.id}`) ? "active" : ""}`}
+                              title={favoriteKeys.has(`list:${list.id}`) ? "즐겨찾기 해제" : "즐겨찾기"}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleFavorite(`list:${list.id}`);
+                              }}
+                            >
+                              {favoriteKeys.has(`list:${list.id}`) ? "★" : "☆"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -14,11 +14,16 @@ apps/
     src/http/validation.ts  공통 Zod 텍스트 검증
     src/security.test.ts    보안/권한/검증/CRUD 회귀 테스트
   web/
-    src/App.tsx             워크스페이스 셸, 화면 조합, 주요 상호작용
-    src/components/ui.tsx   Badge, Tabs, Select, FilterShell 등 공통 UI
-    src/lib/api.ts          fetch 래퍼와 에러 메시지 변환
-    src/lib/router.ts       클라이언트 라우팅 유틸
-    src/lib/viewTypes.ts    API 직렬화 결과에 맞춘 뷰 타입
+    src/App.tsx                 bootstrap, `?unit` / `?list` 쿼리, Shell에 라우트별 페이지 위임
+    src/layout/Shell.tsx        GNB + Unit/Folder/List Explorer + 본문 영역
+    src/components/ui.tsx       Badge, Tabs, Select, FilterShell 등 공통 UI
+    src/components/WorkspaceSurfaceIcons.tsx  Explorer 유닛 범위·리스트 시각( # 미사용 )
+    src/features/tasks/         TaskViewTabs 등 태스크 뷰 UI 조각
+    src/pages/                  Tasks, TaskDetail, Inbox, Graph, Analytics, settings 등
+    src/lib/api.ts              fetch 래퍼와 에러 메시지 변환
+    src/lib/router.ts           클라이언트 라우팅 유틸
+    src/lib/viewTypes.ts        API 직렬화 결과에 맞춘 뷰 타입
+    src/styles.css              전역·셸·Explorer 스타일
 packages/
   shared/
     src/index.ts            도메인 타입, enum, 메타데이터, 시드 데이터
@@ -30,7 +35,7 @@ docs/
 
 - `packages/shared`는 도메인 언어의 기준입니다. `Task`, `Template`, `Mention`, `ApprovalPolicy`, `Analytics`, workflow enum이 여기서 시작됩니다.
 - `apps/api`는 신뢰 경계입니다. 프론트에서 버튼을 숨기더라도 서버는 인증, 역할, 가시성, 입력 검증을 반드시 수행합니다.
-- `apps/web`은 운영 화면과 상호작용을 담당합니다. 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 버킷/백로그/보드 조작이 이곳에 있습니다.
+- `apps/web`은 운영 화면과 상호작용을 담당합니다. `layout/Shell`의 GNB·Explorer(유닛/폴더/리스트), 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 버킷/백로그/보드 조작이 이곳에 있습니다.
 - `docs`는 코드의 현재 상태를 설명하는 기준 문서입니다. enum, API, 역할 정책이 바뀌면 함께 갱신해야 합니다.
 
 ## 현재 제품 모델
@@ -53,7 +58,7 @@ docs/
 ## 현재 한계
 
 - `apps/api/src/server.ts` 라우트가 커졌습니다. 기능이 안정되면 `routes/tasks`, `routes/workspace`, `routes/templates`, `routes/admin`, `routes/notifications`로 나눕니다.
-- `apps/web/src/App.tsx`가 화면 대부분을 담고 있습니다. 안정화 후 `features/tasks`, `features/settings`, `features/inbox`, `features/graph`로 분리합니다.
+- `apps/web/src/App.tsx`는 라우트 분기와 데이터 주입에 집중합니다. 일부 UI는 `features/*`, `pages/*`로 분리되었고, 나머지 화면도 동일 패턴으로 나눌 수 있습니다.
 - 인메모리 저장소라 서버 재시작 시 데이터가 초기화됩니다.
 - 데모 인증 헤더는 실제 인증이 아닙니다. 운영 전에는 세션/JWT/OIDC로 교체해야 합니다.
 

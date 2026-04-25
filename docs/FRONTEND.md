@@ -2,18 +2,27 @@
 
 ## 한 줄 요약
 
-현재 프론트엔드는 `React + Vite` 단일 앱입니다. `App.tsx`가 아직 주요 화면 조합을 담당하고, `components/ui.tsx`가 공통 UI 프리미티브를 제공합니다.
+현재 프론트엔드는 `React + Vite` 단일 앱입니다. `App.tsx`는 `/api/bootstrap`과 라우트 분기, `Shell`이 GNB·Unit/Folder/List Explorer·본문 그리드를 담당하며, 화면별 본문은 `pages/*`와 `features/tasks/*`가 조합합니다. `components/ui.tsx`는 공통 UI 프리미티브를 제공합니다.
 
 ## 파일 구조
 
 ```text
 apps/web/src/
-  App.tsx             워크스페이스 셸, 라우팅, 화면, 주요 상호작용
-  components/ui.tsx   PageHeader, Badge, Tabs, Select, FilterShell 등
-  lib/api.ts          request() fetch 래퍼와 에러 메시지 변환
-  lib/router.ts       currentRoute(), go()
-  lib/viewTypes.ts    API 직렬화 결과용 TaskDetail/TaskView 타입
-  styles.css          전체 UI 스타일과 반응형 규칙
+  App.tsx                        bootstrap, URL `unit`/`list` 쿼리, Shell 하위에 페이지 위임
+  main.tsx                       엔트리
+  layout/Shell.tsx               GNB, Explorer(유닛·폴더·리스트), 전역 검색, 즐겨찾기
+  components/ui.tsx              PageHeader, Badge, Tabs, Select, FilterShell, Centered 등
+  components/WorkspaceSurfaceIcons.tsx  Explorer에서 리스트/유닛 범위 아이콘(#는 노트 커맨드용이므로 미사용)
+  features/tasks/TaskViewTabs.tsx  태스크 뷰 모드(리스트/보드/백로그/그래프) 탭
+  pages/TasksPage.tsx            태스크 작업대
+  pages/TaskDetailPage.tsx       태스크 상세·우측 패널
+  pages/InboxPage.tsx, DecisionGraphPage.tsx, AnalyticsPage.tsx, HierarchyPage.tsx
+  pages/settings/SettingsPages.tsx  설정·관리 화면 묶음
+  lib/api.ts                     request() fetch 래퍼, X-Demo-User-Id
+  lib/router.ts                  currentRoute(), go()
+  lib/viewTypes.ts               TaskDetail / TaskView 등 직렬화 뷰 타입
+  lib/domain.ts                  라벨·표시용 헬퍼
+  styles.css                     전역·셸·익스플로러·화면 스타일
 ```
 
 ## 화면 구성
@@ -23,6 +32,7 @@ apps/web/src/
 - 스레드 입력: `@` 커맨드로 사람/노드/Form 필드 검색, `#` 커맨드로 노트 검색
 - 그래프 뷰: `/graph` 라우트이면서 태스크 뷰 탭에서도 접근
 - Inbox: `DECISION`, `DISCUSSION`, `AWARENESS`, `RESULT` 탭
+- 좌측 Explorer: **Unit → Folder → List** IA(팀즈 팀/채널은 구조 참고용). 리스트 행은 `#` 대신 전용 아이콘으로 표시해 스레드의 `#` 노트 커맨드와 구분합니다.
 - 설정/관리: 프로필, 유닛, 전역 유닛, 접근제어, 멤버, 권한, 승인정책, 템플릿, 알림, 분석
 
 ## 태스크 뷰
@@ -79,6 +89,6 @@ apps/web/src/
 
 ## 유지보수 포인트
 
-- `App.tsx`가 커졌으므로 다음 분리 후보는 `features/tasks`, `features/settings`, `features/inbox`, `features/graph`입니다.
+- `App.tsx`는 데이터 주입과 라우트 스위치 위주이며, 화면은 `pages/*`·`features/*`로 모듈화하는 중입니다.
 - URL query와 React state가 같이 움직이는 뷰는 query 업데이트 로직을 같이 점검해야 합니다.
 - 화면 탭을 추가할 때는 사이드바 메뉴와 중복되지 않게 "탭으로 볼 것"과 "전역 메뉴로 갈 것"을 구분합니다.
