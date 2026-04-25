@@ -89,6 +89,163 @@
 | P3 | 템플릿 중복 감지(fingerprint) | 완료 | `apps/api/src/server.ts`, `apps/api/src/domain/store.ts`, `apps/web/src/pages/settings/SettingsPages.tsx` | fingerprint 생성, 생성/수정 시 유사 후보 반환, 템플릿 센터 유사 배지 노출 |
 | P4 | AI 추천 1단계(추천-only) | 대기 | `apps/api/src/server.ts`, `apps/web/src/pages/TaskDetailPage.tsx`, `apps/web/src/pages/settings/SettingsPages.tsx` | Top-1+대안 추천, 이유 설명, 수락/거절 로그 수집 |
 
+## 목표 다이어그램
+
+아래 다이어그램은 현재 Express/인메모리 구현을 그대로 설명하는 그림이 아니라, KR1.1 도메인 규칙을 운영 DB/Spring 전환까지 확장했을 때의 목표 상태입니다. 현재 구현은 embedded snapshot으로 규칙을 검증했고, 운영 전환 시에는 VersionRef, DB constraint, transactional outbox 구조로 확장합니다.
+
+### 그림 1. KR1.1 목표 도메인 모델
+
+초록은 신규 도메인 자산, 보라는 기존 핵심 축, 두꺼운 선은 VersionRef입니다. 핵심은 Task가 mutable Template 자체가 아니라 immutable TemplateVersion/WorkflowVersion/ApprovalPolicyVersion을 참조하고, 현재 승인 상태는 문자열 추측이 아니라 ApprovalRequest 상태로 판단한다는 점입니다.
+
+```mermaid
+flowchart TB
+  Workspace["Unit · Folder · TaskList<br/>workspace 계층"]
+  Task["Task<br/>templateVersionId<br/>workflowVersionId<br/>approvalPolicyVersionId"]
+  Template["Template<br/>currentVersionId pointer"]
+  TemplateVersion["TemplateVersion<br/>immutable · append-only<br/>version · publishedAt<br/>schema · 직렬화된 본문"]
+  ApprovalRequest["ApprovalRequest · 신규 1급 엔티티<br/>id · taskId<br/>fromStatusId · targetStatusId<br/>policyVersionId · 정책 스냅샷<br/>requestedBy · requestedAt<br/>reason · 요청 사유<br/>referencedNoteVersionRefs<br/>status PENDING APPROVED REJECTED SUPPLEMENT_REQUESTED<br/>UNIQUE INDEX where status PENDING"]
+  ApprovalDecision["ApprovalDecision<br/>id · approvalRequestId<br/>approverId<br/>decision APPROVE / REJECT / SUPPLEMENT_REQUEST<br/>reason · decidedAt"]
+  StatusRule["현재 status는 ApprovalRequest.status로 판단<br/>더 이상 workflowStatusId 문자열 추측 없음"]
+  Note["Note<br/>noteVersionId"]
+  Thread["ThreadComment<br/>멘션 · 노트 참조"]
+  FormOutput["FormOutput<br/>templateVersionId 따라감"]
+  Timeline["TimelineEvent · 감사 로그로 승격<br/>TASK_CREATED · TASK_UPDATED · TASK_TRANSITIONED<br/>APPROVAL_REQUESTED · APPROVAL_APPROVED · APPROVAL_REJECTED · APPROVAL_SUPPLEMENT_REQUESTED<br/>TEMPLATE_SNAPSHOT_APPLIED · NOTE_REFERENCED<br/>각 이벤트는 id + version 참조 보유"]
+  Done["P0가 닫힌 상태 · KR1.1 클로징 가능<br/>VersionRef로 Template 변경 격리 · 승인 1급 엔티티 추적<br/>DB unique index로 동시성 방어"]
+
+  Workspace -->|속함| Task
+  Task ==>|VersionRef| TemplateVersion
+  Template --> TemplateVersion
+  Task -->|N:1| ApprovalRequest
+  ApprovalRequest -->|1:N| ApprovalDecision
+  ApprovalRequest --> StatusRule
+  Note --> Timeline
+  Thread --> Timeline
+  FormOutput --> Timeline
+  ApprovalRequest --> Timeline
+  ApprovalDecision --> Timeline
+  Timeline --> Done
+
+  classDef existing fill:#463f8f,stroke:#6f64d9,color:#f3f0ff
+  classDef workspace fill:#4b4b47,stroke:#85857f,color:#fff
+  classDef new fill:#245c0b,stroke:#76b82a,color:#d7ffc4
+  classDef warning fill:#744300,stroke:#bc7409,color:#ffd98b
+  classDef audit fill:#08604d,stroke:#1ba987,color:#c8fff1
+
+  class Task existing
+  class Workspace workspace
+  class Template,TemplateVersion,ApprovalRequest,ApprovalDecision,Done new
+  class StatusRule,Note,Thread,FormOutput warning
+  class Timeline audit
+```
+
+### 그림 2. KR1.1 목표 요청 파이프라인
+
+세 엔드포인트는 각각 단일 책임을 갖습니다. 일반 전이는 상태 변경만, 승인 요청은 pending request 생성과 중복 방어만, 결정 처리는 request close와 task 상태 전이를 단일 트랜잭션으로 처리합니다. 알림/통계 projection은 outbox worker가 commit 이후 처리합니다.
+
+```mermaid
+flowchart TB
+  Intent["사용자 의도<br/>availableActions에서 선택"]
+  Permission["서버 permissions<br/>DTO에 명시 · SSOT"]
+  Dispatch["request 디스패치<br/>의도에 맞는 엔드포인트로"]
+
+  Transition["A · 일반 전이<br/>POST /tasks/:id/transitions<br/><br/>승인 불필요한 상태 변경<br/>단일 트랜잭션<br/>Task 갱신<br/>TASK_TRANSITIONED 이벤트"]
+  ApprovalCreate["B · 승인 요청<br/>POST /tasks/:id/approval-requests<br/><br/>policyVersionId 스냅샷<br/>DB unique partial index<br/>중복 시 409 reject<br/>APPROVAL_REQUESTED 이벤트"]
+  ApprovalDecide["C · 결정 처리<br/>POST /approval-requests/:id/decisions<br/><br/>APPROVE / REJECT / SUPPLEMENT<br/>단일 트랜잭션 안에서<br/>결정 + Request + Task 갱신<br/>APPROVED -> 자동 상태 전이"]
+
+  OutboxInsert["트랜잭션 안 · 도메인 이벤트와 outbox record INSERT만<br/>TimelineEvent + outbox 테이블에 row INSERT<br/>즉시 커밋 · 알림 발송이나 분석 갱신은 여기서 시도하지 않음"]
+  Worker["커밋 후<br/>워커 · outbox 픽업해서 projection 처리"]
+  Inbox["Inbox projection<br/>결정 · 논의 · 인지 · 결과"]
+  Push["Push notification<br/>웹푸시 · 메일 · 외부 채널"]
+  Engagement["Engagement projection<br/>analytics 입력 갱신"]
+  DetailDto["응답 · 풍부한 TaskDetailDto<br/>task · templateSnapshot · workflowRuntime<br/>activeApprovalRequest · availableActions<br/>permissions · timeline<br/>프론트는 추측하지 않고 그대로 사용"]
+  Result["3 endpoints + DTO + outbox로 KR1.1 실행 모델 고정"]
+
+  Intent --> Permission --> Dispatch
+  Dispatch --> Transition
+  Dispatch --> ApprovalCreate
+  Dispatch --> ApprovalDecide
+  Transition --> OutboxInsert
+  ApprovalCreate --> OutboxInsert
+  ApprovalDecide --> OutboxInsert
+  OutboxInsert --> Worker
+  Worker --> Inbox
+  Worker --> Push
+  Worker --> Engagement
+  Worker --> DetailDto
+  DetailDto --> Result
+
+  classDef blue fill:#0d4e86,stroke:#3a86c8,color:#eaf6ff
+  classDef coral fill:#85331d,stroke:#d16a45,color:#ffe8dc
+  classDef purple fill:#4b3e93,stroke:#8475dd,color:#f0ecff
+  classDef teal fill:#075f4e,stroke:#2ab392,color:#d9fff4
+  classDef amber fill:#744300,stroke:#bd770b,color:#ffe4a6
+  classDef gray fill:#4a4a47,stroke:#85857f,color:#fff
+  classDef green fill:#245c0b,stroke:#76b82a,color:#d7ffc4
+
+  class Intent,Permission,Dispatch blue
+  class Transition coral
+  class ApprovalCreate purple
+  class ApprovalDecide teal
+  class OutboxInsert,Worker,Inbox,Push,Engagement amber
+  class DetailDto gray
+  class Result green
+```
+
+### 그림 3. 운영 전환 목표 아키텍처
+
+초록은 P0 신규, 보라는 P0 재배치, 회색은 기존 유지, 점선은 P1 후속입니다. 현재 repo에서는 P0 도메인/API/DTO가 먼저 닫히고, service layer와 feature 분해는 운영 전환/후속 리팩토링에서 점진 적용합니다.
+
+```mermaid
+flowchart TB
+  subgraph Repo["운영 전환 목표 아키텍처"]
+    subgraph Web["apps/web<br/>features 중심 재배치"]
+      App["App.tsx · 라우트만"]
+      Shell["layout/Shell · GNB + Explorer"]
+      Detail["features/tasks/detail<br/>TaskWorkspace · 200줄<br/>system-fields · 5섹션<br/>approval · forms · notes · thread"]
+      WebLib["lib · markdown · attachments · api"]
+      WebP1["P1 후속<br/>hooks/useTaskMutation<br/>P0 DTO 확정 후 안전하게 추출"]
+      App --> Shell --> Detail --> WebLib
+      Detail -.-> WebP1
+    end
+
+    subgraph Api["apps/api<br/>라우트 + 도메인 서비스 분리"]
+      TaskRoutes["routes/tasks · transitions"]
+      ApprovalRoutes["routes/approvals · 신규"]
+      OtherRoutes["routes/templates · workspace · admin"]
+      Services["domain/services · 신규<br/>TransitionService · ApprovalService<br/>트랜잭션 경계 · outbox INSERT"]
+      Repositories["repositories · DB로 교체 준비"]
+      ApiP1["P1 후속<br/>workers · projection 처리"]
+      TaskRoutes --> Services
+      ApprovalRoutes --> Services
+      OtherRoutes --> Services
+      Services --> Repositories
+      Services -.-> ApiP1
+    end
+
+    Shared["packages/shared · 더 풍부해짐<br/>기존 · Task · Template · enum · 메타데이터 · seed<br/>신규 · TemplateVersion · ApprovalRequest · ApprovalDecision<br/>신규 · TaskDetailDto · TaskAction · TaskPermissions<br/>신규 · TimelineEventV2 · 이벤트 페이로드 타입<br/>VersionRef 헬퍼 · matchVersion · resolveSnapshot"]
+  end
+
+  Web -->|3 + N endpoints| Api
+  Shared --> Web
+  Shared --> Api
+  Asset["본 프로젝트는 SelvasIn4로 이식 가능한 자산<br/>@hwe/shared 도메인 정의가 SelvasIn4 Spring 백엔드의 DTO 골격이 됨<br/>features/tasks/detail 분해안은 그대로 React + Tailwind + shadcn 환경에 적용<br/>TransitionService · ApprovalService 패턴이 Spring @Service 클래스 1:1 매핑"]
+  Shared --> Asset
+
+  classDef web fill:#0d4e86,stroke:#3a86c8,color:#eaf6ff
+  classDef api fill:#85331d,stroke:#d16a45,color:#ffe8dc
+  classDef shared fill:#463f8f,stroke:#6f64d9,color:#f3f0ff
+  classDef green fill:#245c0b,stroke:#76b82a,color:#d7ffc4
+  classDef p1 fill:#16415c,stroke:#406b82,color:#d5f2ff,stroke-dasharray: 5 5
+  classDef asset fill:#245c0b,stroke:#76b82a,color:#d7ffc4
+
+  class App,Shell web
+  class TaskRoutes,OtherRoutes api
+  class Detail,Shared shared
+  class WebLib,ApprovalRoutes,Services green
+  class WebP1,ApiP1 p1
+  class Asset asset
+```
+
 ## 운영 전환 보강 원칙
 
 현재 Express/인메모리 구현은 KR1.1 도메인 규칙을 빠르게 검증하기 위해 Task에 snapshot JSON을 직접 보관합니다. Spring Boot + MyBatis + RDB 운영 전환 시에는 아래 원칙을 우선합니다.
