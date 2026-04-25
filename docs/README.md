@@ -16,6 +16,7 @@ docs/
     KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md
     KR1_1_FREEFORM_TEMPLATE_BIDIRECTIONAL_FLOWS.md
     KR1_1_COMPLETION_OPERATIONS_CHECKLIST.md
+    KR1_1_TEAM_DEV_CLOSURE_PLAN.md
   ARCHITECTURE.md
   FRONTEND.md
   BACKEND.md
@@ -81,6 +82,7 @@ docs/
 - `kr1-1/KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md`: 템플릿 전환 시 워크플로우 상태 처리 비교/권장안
 - `kr1-1/KR1_1_FREEFORM_TEMPLATE_BIDIRECTIONAL_FLOWS.md`: 자유폼/템플릿 양방향 사용자 플로우 및 커버리지
 - `kr1-1/KR1_1_COMPLETION_OPERATIONS_CHECKLIST.md`: KR1.1 `완료(달성)`/`운영보강(안정화)` 2열 체크리스트
+- `kr1-1/KR1_1_TEAM_DEV_CLOSURE_PLAN.md`: 실제 팀 dev 구현 현황 기준 KR1.1 클로징 우선순위와 하위 태스크
 - `business-rules/BUSINESS_RULES.md`: 제품에서 반드시 지켜야 하는 운영 기준과 서버 검증 원칙
 - `business-rules/DOMAIN_GLOSSARY.md`: Unit, Work Graph, Template, Inbox, Decision Graph 등 핵심 도메인 용어 정의
 - `business-rules/SYSTEM_SPEC.md`: 비즈니스 룰을 시스템 요구사항과 영향 영역으로 매핑
