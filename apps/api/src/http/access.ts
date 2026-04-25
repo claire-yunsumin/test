@@ -47,8 +47,10 @@ export function requireRole(req: Request, res: Response, required: Role) {
   return true;
 }
 
-export function canEditTask(user: Member) {
-  return isRoleAtLeast(user.role, "MEMBER");
+export function canEditTask(user: Member, task: Task) {
+  if (user.role === "ADMIN" || user.role === "SUPER_ADMIN") return true;
+  if (task.ownerId === user.id || task.assigneeIds.includes(user.id)) return true;
+  return data.unitMembers.some((row) => row.unitId === task.unitId && row.memberId === user.id && row.role === "OWNER");
 }
 
 export function canEditForm(user: Member, task: Task) {
@@ -66,13 +68,27 @@ export function visibleTaskIdsFor(user: Member) {
       .flatMap((task) => {
         const ids = [task.id];
         let cursor = task.parentId ? byId(data.tasks, task.parentId) : undefined;
-        while (cursor) {
+        const seen = new Set(ids);
+        while (cursor && !seen.has(cursor.id)) {
+          seen.add(cursor.id);
           ids.push(cursor.id);
           cursor = cursor.parentId ? byId(data.tasks, cursor.parentId) : undefined;
         }
         return ids;
       })
   );
+}
+
+export function wouldCreateTaskCycle(taskId: string, nextParentId: string | null) {
+  if (!nextParentId) return false;
+  let cursor = byId(data.tasks, nextParentId);
+  const seen = new Set<string>();
+  while (cursor) {
+    if (cursor.id === taskId || seen.has(cursor.id)) return true;
+    seen.add(cursor.id);
+    cursor = cursor.parentId ? byId(data.tasks, cursor.parentId) : undefined;
+  }
+  return false;
 }
 
 export function getVisibleTask(req: Request, res: Response, taskId: string) {

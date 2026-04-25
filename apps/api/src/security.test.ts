@@ -99,6 +99,35 @@ describe("authorization boundaries", () => {
     assert.equal(body.error, "FORBIDDEN");
   });
 
+  test("prevents watchers from editing task fields while allowing assignees", async () => {
+    const watcherPatch = await api("/api/tasks/task-marketing-strategy", {
+      userId: "u-viewer",
+      method: "PATCH",
+      body: JSON.stringify({ title: "Watcher title takeover" })
+    });
+
+    assert.equal(watcherPatch.response.status, 403);
+    assert.equal(watcherPatch.body.error, "FORBIDDEN");
+
+    const assigneePatch = await api("/api/tasks/task-marketing-strategy", {
+      userId: "u-marketing",
+      method: "PATCH",
+      body: JSON.stringify({ title: "Assignee title update" })
+    });
+
+    assert.equal(assigneePatch.response.status, 200);
+    assert.equal(assigneePatch.body.title, "Assignee title update");
+  });
+
+  test("hides child tasks outside the user's visible scope in task detail", async () => {
+    const { response, body } = await api("/api/tasks/task-marketing-strategy", { userId: "u-viewer" });
+
+    assert.equal(response.status, 200);
+    assert.equal(body.task.id, "task-marketing-strategy");
+    assert.ok(body.children.every((child: { id: string }) => child.id !== "task-competitive-context"));
+    assert.ok(body.referenceableTasks.every((task: { id: string }) => task.id !== "task-competitive-context"));
+  });
+
   test("prevents comment edits by users who are neither author nor ADMIN", async () => {
     const created = await api("/api/tasks/task-marketing-strategy/comments", {
       userId: "u-admin",
@@ -147,6 +176,30 @@ describe("authorization boundaries", () => {
 
     assert.equal(response.status, 403);
     assert.equal(body.error, "FORBIDDEN");
+  });
+
+  test("limits read-all inbox changes to the acting user even for admins", async () => {
+    const comment = await api("/api/tasks/task-marketing-strategy/comments", {
+      userId: "u-marketing",
+      method: "POST",
+      body: JSON.stringify({
+        content: "Admin mention",
+        mentions: [{ type: "MEMBER", targetId: "u-admin", label: "관리자" }]
+      })
+    });
+    assert.equal(comment.response.status, 201);
+
+    const readAll = await api("/api/inbox/read-all", {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ componentType: "DISCUSSION" })
+    });
+    assert.equal(readAll.response.status, 200);
+    assert.equal(readAll.body.changed, 2);
+
+    const pmBootstrap = await api("/api/bootstrap", { userId: "u-pm" });
+    const pmDiscussion = pmBootstrap.body.inbox.find((item: { id: string }) => item.id === "inbox-2");
+    assert.equal(pmDiscussion.readAt, null);
   });
 });
 
@@ -263,6 +316,17 @@ describe("input validation", () => {
 
     assert.equal(patched.response.status, 400);
     assert.equal(patched.body.error, "FOLDER_LIST_MISMATCH");
+  });
+
+  test("rejects parent changes that would create hierarchy cycles", async () => {
+    const { response, body } = await api("/api/tasks/task-marketing-strategy", {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ parentId: "task-target-research" })
+    });
+
+    assert.equal(response.status, 400);
+    assert.equal(body.error, "INVALID_PARENT");
   });
 
   test("rejects invalid mentions and accepts valid member, task, field, and note mentions", async () => {

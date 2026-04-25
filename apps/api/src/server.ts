@@ -15,7 +15,7 @@ import {
   type ThreadComment,
   type WorkflowPhase
 } from "@hwe/shared";
-import { meId, authenticate, canEditForm, canEditTask, getVisibleTask, requireRole, validateMembers, validateMentions, validateNoteRefs, visibleTaskIdsFor } from "./http/access.js";
+import { meId, authenticate, canEditForm, canEditTask, getVisibleTask, requireRole, validateMembers, validateMentions, validateNoteRefs, visibleTaskIdsFor, wouldCreateTaskCycle } from "./http/access.js";
 import { applySecurity, rateLimit } from "./http/security.js";
 import { optionalText, text } from "./http/validation.js";
 import { addEngagement, addInbox, addTimeline, applyTemplate, byId, calculateAnalytics, componentForEvent, data, now, serializeTask } from "./domain/store.js";
@@ -536,7 +536,7 @@ app.get("/api/tasks/:taskId", (req, res) => {
 	  res.json({
 	    task: serializeTask(task),
 	    parent: task.parentId ? serializeTask(byId(data.tasks, task.parentId)!) : null,
-	    children: data.tasks.filter((row) => row.parentId === task.id).map(serializeTask),
+	    children: data.tasks.filter((row) => row.parentId === task.id && visibleIds.has(row.id)).map(serializeTask),
       referenceableTasks: data.tasks.filter((row) => visibleIds.has(row.id)).map(serializeTask),
 	    notes: data.notes.filter((note) => note.taskId === task.id),
       attachments: data.attachments.filter((attachment) => attachment.taskId === task.id),
@@ -545,7 +545,7 @@ app.get("/api/tasks/:taskId", (req, res) => {
 	    timeline: data.timeline.filter((event) => event.taskId === task.id),
 	    members: data.members,
       permissions: {
-        canEditTask: canEditTask(req.user!),
+        canEditTask: canEditTask(req.user!, task),
         canEditForm: canEditForm(req.user!, task)
       }
   });
@@ -581,7 +581,10 @@ app.patch("/api/tasks/:taskId", (req, res) => {
 
   const hasFormPatch = patch.formValues !== undefined || patch.description !== undefined;
   const hasTaskPatch = Object.keys(patch).some((key) => key !== "formValues" && key !== "description");
-  if (hasTaskPatch && !requireRole(req, res, "MEMBER")) return;
+  if (hasTaskPatch && !canEditTask(req.user!, task)) {
+    res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
+    return;
+  }
   if (hasFormPatch && !canEditForm(req.user!, task)) {
     res.status(403).json({ error: "FORBIDDEN", requestId: req.requestId });
     return;
@@ -627,7 +630,7 @@ app.patch("/api/tasks/:taskId", (req, res) => {
   }
   if (patch.parentId !== undefined) {
     const previousParentId = task.parentId;
-    if (patch.parentId === task.id) {
+    if (wouldCreateTaskCycle(task.id, patch.parentId)) {
       res.status(400).json({ error: "INVALID_PARENT", requestId: req.requestId });
       return;
     }
@@ -1124,7 +1127,7 @@ app.patch("/api/inbox/read-all", (req, res) => {
   const me = meId(req);
   let changed = 0;
   data.inbox.forEach((item) => {
-    const sameUser = item.userId === me || req.user!.role === "ADMIN" || req.user!.role === "SUPER_ADMIN";
+    const sameUser = item.userId === me;
     const sameType = !body.componentType || item.componentType === body.componentType;
     if (sameUser && sameType && !item.readAt) {
       item.readAt = now();
