@@ -90,9 +90,10 @@ export function addEngagement(event: Omit<EngagementEvent, "id" | "createdAt">) 
 }
 
 export function componentForEvent(type: string): InboxComponent {
-  if (["APPROVAL_REQUESTED", "APPROVAL_REJECTED"].includes(type)) return "DECISION";
+  if (["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED"].includes(type)) return "DECISION";
   if (["COMMENT", "MENTION", "NOTE_UPDATED"].includes(type)) return "DISCUSSION";
   if (["COMPLETED", "CANCELED"].includes(type)) return "RESULT";
+  if (["TASK_CREATED", "STATE_TRANSITION", "HIERARCHY_CHANGE", "TEMPLATE_APPLIED", "TEMPLATE_REPLACED", "TEMPLATE_REMOVED"].includes(type)) return "AWARENESS";
   return "AWARENESS";
 }
 
@@ -116,6 +117,9 @@ export function calculateAnalytics(): Analytics {
   const comments = data.comments;
   const notes = data.notes;
   const tasks = data.tasks;
+  const inbox = data.inbox;
+  const nowAt = Date.now();
+  const weekAgo = nowAt - (7 * 24 * 60 * 60 * 1000);
   const mentionCount = comments.reduce((sum, comment) => sum + comment.mentions.length, 0);
   const mentionThreadCount = comments.filter((comment) => comment.mentions.length > 0 || comment.referencedNoteIds.length > 0).length;
   const templatedTasks = tasks.filter((task) => task.structureState === "TEMPLATED");
@@ -130,9 +134,34 @@ export function calculateAnalytics(): Analytics {
     return comment.authorId !== task.ownerId || Boolean(task.assigneeIds.find((id) => nonDevAuthors.has(id)));
   }).length;
   const eventCount = (type: EngagementEventType) => data.engagement.filter((event) => event.type === type).length;
+  const weeklyVoluntaryVisits = data.engagement.filter((event) => {
+    if (event.type !== "VOLUNTARY_VISIT") return false;
+    return new Date(event.createdAt).getTime() >= weekAgo;
+  }).length;
+  const alarmEvents = inbox.length;
+  const actionCount = data.engagement.filter((event) =>
+    ["DECISION_TRANSITION", "COMMENT_CREATED", "NOTE_UPDATED", "MENTION_CREATED"].includes(event.type)
+  ).length;
+  const decisionRequested = data.timeline.filter((event) => event.type === "APPROVAL_REQUESTED").length;
+  const decisionClosed = data.timeline.filter((event) =>
+    event.type === "APPROVAL_APPROVED" || event.type === "APPROVAL_REJECTED"
+  ).length;
+  const templateTransitionEvents = data.timeline.filter((event) =>
+    event.type === "TEMPLATE_APPLIED" || event.type === "TEMPLATE_REPLACED" || event.type === "TEMPLATE_REMOVED"
+  );
+  const successfulTemplateMappings = templateTransitionEvents.filter((event) => {
+    const mapping = event.payload.statusMapping as { mappedStatusId?: string | null } | undefined;
+    if (!mapping) return event.type === "TEMPLATE_REMOVED";
+    return Boolean(mapping.mappedStatusId);
+  }).length;
+  const manualTemplateMappings = templateTransitionEvents.filter((event) => {
+    const mapping = event.payload.statusMapping as { method?: string } | undefined;
+    return mapping?.method === "manual_required";
+  }).length;
 
   return {
     weeklyReturnRate: Math.min(1, eventCount("VOLUNTARY_VISIT") / Math.max(1, data.members.length)),
+    weeklyVoluntaryReturnRate: Math.min(1, weeklyVoluntaryVisits / Math.max(1, data.members.length)),
     notesThreadBalance: `${notes.length}:${comments.length}`,
     nonDevContributionRate: comments.length ? comments.filter((comment) => nonDevAuthors.has(comment.authorId)).length / comments.length : 0,
     noteReferenceRate: comments.length ? comments.filter((comment) => comment.referencedNoteIds.length > 0).length / comments.length : 0,
@@ -146,6 +175,12 @@ export function calculateAnalytics(): Analytics {
     mentionThreadCount,
     crossFunctionalThreadRate: comments.length ? crossFunctionalThreads / comments.length : 0,
     feedbackNodeRevisionRate: data.engagement.filter((event) => event.type === "NODE_UPDATED" && event.metadata.afterFeedback === true).length / Math.max(1, mentionThreadCount),
-    voluntaryVisitCount: eventCount("VOLUNTARY_VISIT")
+    voluntaryVisitCount: eventCount("VOLUNTARY_VISIT"),
+    alarmActionConversionRate: Math.min(1, actionCount / Math.max(1, alarmEvents)),
+    decisionClosureRate: Math.min(1, decisionClosed / Math.max(1, decisionRequested)),
+    templateStatusMappingSuccessRate: Math.min(1, successfulTemplateMappings / Math.max(1, templateTransitionEvents.length)),
+    templateManualAdjustmentRate: Math.min(1, manualTemplateMappings / Math.max(1, templateTransitionEvents.length)),
+    computedAt: now(),
+    dataStatus: "ok"
   };
 }

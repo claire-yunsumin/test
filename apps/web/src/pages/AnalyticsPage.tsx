@@ -65,11 +65,17 @@ import {
 } from "../lib/domain";
 
 export function AnalyticsView({ analytics }: { analytics: Analytics }) {
+  const unmetNeedsYes = analytics.shapedNodeCount > 0
+    && analytics.templatedNodeCount > 0
+    && analytics.mentionThreadCount > 0;
+  const retentionYes = analytics.alarmActionConversionRate >= 0.6
+    && analytics.decisionClosureRate >= 0.6
+    && analytics.weeklyVoluntaryReturnRate > 0;
   const headline = [
-    ["Unmet Needs", analytics.shapedNodeCount > 0 && analytics.mentionThreadCount > 0 ? "YES" : "WATCH", "object clarity"],
-    ["Retention", analytics.voluntaryVisitsPerWeek > 0 ? "YES" : "WATCH", `${analytics.voluntaryVisitsPerWeek}/week`],
+    ["Unmet Needs", unmetNeedsYes ? "YES" : "WATCH", "object clarity"],
+    ["Retention", retentionYes ? "YES" : "WATCH", `${analytics.voluntaryVisitsPerWeek}/week`],
     ["Loop Quality", pct(analytics.feedbackNodeRevisionRate), "feedback revision"],
-    ["Decision Flow", String(analytics.decisionEvents), "events"]
+    ["Decision Flow", String(analytics.decisionEvents), `closure ${pct(analytics.decisionClosureRate)}`]
   ];
   const rows = [
     ["형상화", "Work Graph에 결정 대상이 존재하는가", analytics.shapedNodeCount, "노드 수"],
@@ -82,10 +88,15 @@ export function AnalyticsView({ analytics }: { analytics: Analytics }) {
     ["Revision", "피드백 이후 구조가 다시 바뀌는가", pct(analytics.feedbackNodeRevisionRate), "rate"]
   ];
   const cards = [
-    ["주간 재방문", pct(analytics.weeklyReturnRate), "자발 루프"],
+    ["주간 재방문(7d)", pct(analytics.weeklyVoluntaryReturnRate), "자발 루프"],
+    ["Alarm->Action", pct(analytics.alarmActionConversionRate), "trigger to action"],
+    ["결정 귀속 완결", pct(analytics.decisionClosureRate), "request to closure"],
+    ["템플릿 상태 매핑 성공", pct(analytics.templateStatusMappingSuccessRate), "template transition"],
+    ["템플릿 수동 보정률", pct(analytics.templateManualAdjustmentRate), "manual required"],
     ["노트 : 스레드", analytics.notesThreadBalance, "근거/논의 균형"],
     ["비개발 편집", pct(analytics.nonDevContributionRate), "cross function"],
-    ["#참조율", pct(analytics.noteReferenceRate), "evidence link"]
+    ["#참조율", pct(analytics.noteReferenceRate), "evidence link"],
+    ["집계 시각", analytics.computedAt, analytics.dataStatus]
   ];
   return (
     <section className="page-stack">

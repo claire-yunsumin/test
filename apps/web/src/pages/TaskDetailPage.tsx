@@ -146,6 +146,24 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
   const changed = hasChangedSinceSeen(task, parent, me.id);
   const canApprove = ["OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
   const canDeleteTask = me.role === "ADMIN" || me.role === "SUPER_ADMIN" || task.ownerId === me.id;
+  const latestDecisionEvent = timeline.find((event) =>
+    ["APPROVAL_REQUESTED", "APPROVAL_APPROVED", "APPROVAL_REJECTED"].includes(event.type)
+  );
+  const pendingApproval = (task.workflowStatusId ?? "").includes("pending");
+  const decisionStageLabel = pendingApproval
+    ? "승인 대기"
+    : latestDecisionEvent?.type === "APPROVAL_APPROVED"
+      ? "승인 완료"
+      : latestDecisionEvent?.type === "APPROVAL_REJECTED"
+        ? "반려 완료"
+        : latestDecisionEvent?.type === "APPROVAL_REQUESTED"
+          ? "검토 진행"
+          : "일반 전이";
+  const approvalPayload = latestDecisionEvent?.payload ?? {};
+  const approvalLineCount = Number(approvalPayload.approvalLineCount ?? 0);
+  const finalApproverId = typeof approvalPayload.finalApproverId === "string" ? approvalPayload.finalApproverId : null;
+  const transitionApprovalEnabled = Boolean(approvalPayload.transitionApprovalEnabled);
+  const finalApproverName = finalApproverId ? memberName(members, finalApproverId) : null;
 
   const deleteTask = async () => {
     if (!canDeleteTask || !window.confirm("이 태스크와 하위 태스크, 노트, 스레드, 타임라인을 삭제할까요?")) return;
@@ -255,6 +273,23 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               <span>{permissionStatus}</span>
               {!canEditForm && <em>양식 산출물도 읽기 전용</em>}
             </div>
+            <div className={`permission-strip ${pendingApproval ? "readonly" : "editable"}`}>
+              <strong>합의/승인 단계</strong>
+              <span>{decisionStageLabel}</span>
+              {latestDecisionEvent?.reason ? <em>최근 사유: {shortText(latestDecisionEvent.reason, 80)}</em> : null}
+              <em>
+                {transitionApprovalEnabled || task.approvalPolicyId
+                  ? `정책 ${task.approvalPolicyId ? "연결" : "미지정"} · 승인 라인 ${approvalLineCount}`
+                  : "승인 게이트 비활성"}
+              </em>
+              {finalApproverName ? <em>최종 승인자: {finalApproverName}</em> : null}
+            </div>
+            {task.policyReviewRequired ? (
+              <div className="permission-strip readonly">
+                <strong>정책 재검토 필요</strong>
+                <span>{task.policyReviewReason ?? "템플릿 전환 후 승인정책/워크플로우 정합성 확인이 필요합니다."}</span>
+              </div>
+            ) : null}
             <SystemFieldsPanel
               task={task}
               members={members}
@@ -2463,6 +2498,15 @@ function DecisionModal({
           <div>
             <div className="eyebrow">결정</div>
             <h2>{decision.title}</h2>
+            <p className="muted">
+              {decision.decisionType === "APPROVE"
+                ? "승인 시 상태가 완료로 전환되고 결정 이력이 타임라인에 기록됩니다."
+                : decision.decisionType === "REJECT"
+                  ? "반려 시 반려 사유와 참조 노트가 타임라인에 남습니다."
+                  : decision.decisionType === "SUPPLEMENT"
+                    ? "보완 요청 시 재검토가 필요한 근거를 남겨 다음 액션을 명확히 합니다."
+                    : "상태 변경 사유를 남겨 추적 가능성을 유지합니다."}
+            </p>
           </div>
           <button type="button" className="icon-button" onClick={onClose}>×</button>
         </div>

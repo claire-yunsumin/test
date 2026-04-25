@@ -78,6 +78,10 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
     await request(`/api/inbox/${id}/read`, { method: "PATCH" });
     await onReload();
   };
+  const markAck = async (id: string) => {
+    await request(`/api/inbox/${id}/ack`, { method: "PATCH" });
+    await onReload();
+  };
   const remind = async (id: string) => {
     await request(`/api/inbox/${id}/remind`, { method: "POST" });
     await onReload();
@@ -89,12 +93,13 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
   const sentSummary = useMemo(() => {
     const total = sentItems.length;
     const read = sentItems.filter((item) => Boolean(item.readAt)).length;
+    const acked = sentItems.filter((item) => Boolean(item.ackAt)).length;
     const overdue = sentItems.filter((item) => {
       if (item.readAt) return false;
       const ageHours = (Date.now() - new Date(item.createdAt).getTime()) / 36e5;
       return ageHours >= slaHours;
     }).length;
-    return { total, read, overdue };
+    return { total, read, acked, overdue };
   }, [sentItems, slaHours]);
 
   return (
@@ -108,6 +113,7 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
         <span><b>{items.filter((item) => !item.readAt).length}</b><small>unread in tab</small></span>
         <span><b>{sentSummary.overdue}</b><small>SLA overdue</small></span>
         <span><b>{sentSummary.read}/{sentSummary.total}</b><small>sent read</small></span>
+        <span><b>{sentSummary.acked}</b><small>sent acked</small></span>
         <span><b>{slaHours}h</b><small>SLA</small></span>
       </div>
       <div className="inbox-layout">
@@ -133,12 +139,14 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
                 <small className="inbox-row-meta-line">
                   <span>{taskMap.get(item.taskId)?.title}</span>
                   <span>{item.readAt ? "읽음" : "미확인"}</span>
+                  <span>{item.ackAt ? "처리완료" : "미처리"}</span>
                   <span>{elapsed(item.createdAt)}</span>
                 </small>
               </div>
               <div className="row-actions">
                 <button className="button secondary" onClick={() => go(`/tasks/${item.taskId}`)}>열기</button>
                 <button className="button secondary" onClick={() => void markRead(item.id)}>{item.readAt ? "안 읽음" : "읽음"}</button>
+                <button className="button secondary" onClick={() => void markAck(item.id)}>{item.ackAt ? "처리 취소" : "처리 완료"}</button>
               </div>
             </div>
           ))}
@@ -147,21 +155,24 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
         <aside className="list-panel inbox-sent-panel">
           <div className="inbox-panel-head">
             <PanelTitle title="발신함" />
-            <span className="signal-chip">{sentSummary.read}/{sentSummary.total}</span>
+            <span className="signal-chip">{sentSummary.read}/{sentSummary.total} · ack {sentSummary.acked}</span>
           </div>
           <p className="inbox-sent-summary">
-            수신자 미열람 {Math.max(0, sentSummary.total - sentSummary.read)} · SLA 초과 {sentSummary.overdue}
+            수신자 미열람 {Math.max(0, sentSummary.total - sentSummary.read)} · 미처리 {Math.max(0, sentSummary.total - sentSummary.acked)} · SLA 초과 {sentSummary.overdue}
           </p>
           {sentItems.slice(0, 30).map((item) => (
             <div className={`inbox-row inbox-sent-row ${item.readAt ? "" : "unread"}`} key={`sent-${item.id}`}>
               <div>
-                <Badge tone={item.readAt ? "green" : "amber"}>{item.readAt ? "수신자 열람" : "수신자 미열람"}</Badge>
+                <Badge tone={item.ackAt ? "green" : item.readAt ? "blue" : "amber"}>
+                  {item.ackAt ? "수신자 처리완료" : item.readAt ? "수신자 열람" : "수신자 미열람"}
+                </Badge>
                 <h3>{item.title}</h3>
                 <p>{item.message}</p>
                 <small className="inbox-row-meta-line">
                   <span>{taskMap.get(item.taskId)?.title}</span>
                   <span>수신자 {data.members.find((m) => m.id === item.userId)?.name ?? item.userId}</span>
                   {item.readAt ? <span>열람 {elapsed(item.readAt)}</span> : null}
+                  {item.ackAt ? <span>처리 {elapsed(item.ackAt)}</span> : null}
                   {!item.readAt && ((Date.now() - new Date(item.createdAt).getTime()) / 36e5 >= slaHours) ? <span>SLA 지연</span> : null}
                   {(item.remindCount ?? 0) > 0 ? <span>리마인드 {item.remindCount}회</span> : null}
                 </small>

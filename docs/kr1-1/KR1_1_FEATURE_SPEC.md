@@ -37,6 +37,9 @@
 | 템플릿 연계 필드 | `templateId`, `templateType`, `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema` |
 | 관계 규칙 핵심 | parent chain 유효성, cycle 금지 |
 | 멘션 타입 | MEMBER, TASK, FORM_FIELD, NOTE |
+| 양방향 전환 원칙 | FREEFORM/TEMPLATED 전환은 단일 Task 모델에서 처리하며 협업 데이터(Thread/Timeline/Notes/Attachments)는 `taskId` 귀속으로 유지 |
+| 상태/워크플로우 처리 | 결정본 정책(KR11-TP-v1)은 템플릿 변경 시 카테고리 기반 안전 매핑(B안)을 적용한다 |
+| 정책/정합성 참고 | 상세 정책/예외/서버 검증 규칙은 `KR1_1_TRANSITION_POLICY_DECISION.md`를 기준으로 운영 |
 
 ## KPI 매핑 (KR 1.1)
 
@@ -55,3 +58,25 @@
 | 승인 정책 세부 운영 | KR 1.2 범위 |
 | 알람 분류/처리 운영 | KR 1.2 범위 |
 | AI 생성/검수 | Objective 2 범위 |
+
+## 하위 문서
+
+| 문서 | 설명 |
+| --- | --- |
+| `KR1_1_IMPLEMENTATION_PLAN.md` | KR1.1 전환 정책 결정본을 실제 코드/UX/지표로 반영하기 위한 구현 실행 플랜 |
+| `KR1_1_TRANSITION_POLICY_DECISION.md` | FREEFORM/TEMPLATED 전환 정책 결정본(예외 케이스, 서버 검증, 이벤트 스키마) |
+| `KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md` | FREEFORM/TEMPLATED 전환 및 템플릿 변경 시 워크플로우 상태 처리 3안 비교 및 권장안 |
+| `KR1_1_FREEFORM_TEMPLATE_BIDIRECTIONAL_FLOWS.md` | 자유 형상화 시작 후 템플릿 적용/저장/교체/해제까지 사용자 플로우 매트릭스 |
+
+## 구현 완료/검증 동기화 (KR11-TP-v1)
+
+| 항목 | 상태 | 근거 |
+| --- | --- | --- |
+| 상태 안전 매핑 (카테고리/기본 fallback) | 완료 | `apps/api/src/server.ts` 전환 매핑 로직 + `apps/api/src/security.test.ts` KR11-IT-01/02 |
+| 정책 정합성 재검증 및 경고 가시화 | 완료 | `policyReviewRequired`, `policyReviewReason` 반영 (`packages/shared/src/index.ts`, `TaskDetailPage.tsx`) + KR11-IT-03 |
+| 전환 이벤트 구분 추적 | 완료 | `TEMPLATE_APPLIED/REPLACED/REMOVED` 타입/라벨 반영 (`packages/shared/src/index.ts`, `apps/web/src/lib/domain.ts`) + KR11-IT-05 |
+| 템플릿 해제 시 협업 데이터 연속성 | 완료 | 템플릿 해제 후 `taskId` 귀속 데이터 유지 정책 구현 + KR11-IT-04 |
+| 지표 운영 연동 | 완료 | `templateStatusMappingSuccessRate`, `templateManualAdjustmentRate` 계산/노출 (`apps/api/src/domain/store.ts`, `AnalyticsPage.tsx`) |
+
+검증 메모:
+- API 테스트: `npm run test -w apps/api` 통과 (35 passed / 0 failed)

@@ -586,6 +586,158 @@ describe("input validation", () => {
   });
 });
 
+describe("KR1.1 transition policy (KR11-TP-v1)", () => {
+  test("maps workflow status by category when applying template", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Policy mapping target", structureState: "FREEFORM", currentState: "IN_PROGRESS" })
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.workflowStatusId, "in_progress");
+
+    const applied = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: "tpl-marketing-objective" })
+    });
+    assert.equal(applied.response.status, 200);
+    assert.equal(applied.body.templateId, "tpl-marketing-objective");
+    assert.equal(applied.body.workflowStatusId, "in_progress");
+    assert.equal(applied.body.policyReviewRequired, false);
+
+    const detail = await api(`/api/tasks/${created.body.id}`, { userId: "u-admin" });
+    const templateEvent = detail.body.timeline.find((event: { type: string }) => event.type === "TEMPLATE_APPLIED");
+    assert.ok(templateEvent);
+    assert.equal(templateEvent.payload.statusMapping.method, "category");
+  });
+
+  test("falls back to default status when category mapping is unavailable", async () => {
+    const pendingTemplate = await api("/api/templates", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ name: "Pending Template", type: "TASK", enabled: true })
+    });
+    assert.equal(pendingTemplate.response.status, 201);
+
+    const pendingWorkflow = await api(`/api/templates/${pendingTemplate.body.id}/workflow`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({
+        statuses: [
+          { id: "only_pending", name: "Only Pending", category: "PENDING_APPROVAL" }
+        ],
+        transitions: [
+          { fromStatusId: "only_pending", toStatusId: "only_pending", label: "유지", decisionType: "SUPPLEMENT", isDecision: true }
+        ]
+      })
+    });
+    assert.equal(pendingWorkflow.response.status, 200);
+
+    const fallbackTemplate = await api("/api/templates", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ name: "Fallback Template", type: "TASK", enabled: true })
+    });
+    assert.equal(fallbackTemplate.response.status, 201);
+
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Default-fallback target", templateId: pendingTemplate.body.id })
+    });
+    assert.equal(created.response.status, 201);
+    assert.equal(created.body.workflowStatusId, "open");
+
+    const toPending = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ workflowStatusId: "only_pending" })
+    });
+    assert.equal(toPending.response.status, 200);
+    assert.equal(toPending.body.workflowStatusId, "only_pending");
+
+    const applied = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: fallbackTemplate.body.id })
+    });
+    assert.equal(applied.response.status, 200);
+    assert.equal(applied.body.workflowStatusId, "open");
+
+    const detail = await api(`/api/tasks/${created.body.id}`, { userId: "u-admin" });
+    const templateEvent = detail.body.timeline.find((event: { type: string }) => event.type === "TEMPLATE_REPLACED");
+    assert.ok(templateEvent);
+    assert.equal(templateEvent.payload.statusMapping.method, "default");
+  });
+
+  test("flags policy review and clears disabled approval policy on template change", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Policy validation target", structureState: "FREEFORM" })
+    });
+    assert.equal(created.response.status, 201);
+
+    const assignPolicy = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ approvalPolicyId: "ap-default-unit-approver" })
+    });
+    assert.equal(assignPolicy.response.status, 200);
+    assert.equal(assignPolicy.body.approvalPolicyId, "ap-default-unit-approver");
+
+    const disablePolicy = await api("/api/admin/approval-policies/ap-default-unit-approver", {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ enabled: false })
+    });
+    assert.equal(disablePolicy.response.status, 200);
+    assert.equal(disablePolicy.body.enabled, false);
+
+    const applyTemplate = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: "tpl-task" })
+    });
+    assert.equal(applyTemplate.response.status, 200);
+    assert.equal(applyTemplate.body.approvalPolicyId, null);
+    assert.equal(applyTemplate.body.policyReviewRequired, true);
+    assert.match(applyTemplate.body.policyReviewReason, /비활성화|삭제/);
+  });
+
+  test("records template replaced and removed timeline events", async () => {
+    const created = await api("/api/tasks", {
+      userId: "u-admin",
+      method: "POST",
+      body: JSON.stringify({ title: "Template replace target", templateId: "tpl-task" })
+    });
+    assert.equal(created.response.status, 201);
+
+    const replaced = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: "tpl-product-phase" })
+    });
+    assert.equal(replaced.response.status, 200);
+    assert.equal(replaced.body.templateId, "tpl-product-phase");
+
+    const removed = await api(`/api/tasks/${created.body.id}`, {
+      userId: "u-admin",
+      method: "PATCH",
+      body: JSON.stringify({ templateId: null })
+    });
+    assert.equal(removed.response.status, 200);
+    assert.equal(removed.body.templateId, null);
+    assert.equal(removed.body.structureState, "FREEFORM");
+
+    const detail = await api(`/api/tasks/${created.body.id}`, { userId: "u-admin" });
+    const types = detail.body.timeline.map((event: { type: string }) => event.type);
+    assert.ok(types.includes("TEMPLATE_REPLACED"));
+    assert.ok(types.includes("TEMPLATE_REMOVED"));
+  });
+});
+
 describe("admin CRUD smoke path", () => {
   test("creates, updates, and deletes mutable resources", async () => {
     const workflowStatuses = await api("/api/workflow/statuses", {

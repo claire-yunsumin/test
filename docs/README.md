@@ -9,6 +9,12 @@ docs/
   README.md
   OKR_MVP1_MVP2.md
   OKR_MATCHING_REPORT.md
+  kr1-1/
+    KR1_1_FEATURE_SPEC.md
+    KR1_1_IMPLEMENTATION_PLAN.md
+    KR1_1_TRANSITION_POLICY_DECISION.md
+    KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md
+    KR1_1_FREEFORM_TEMPLATE_BIDIRECTIONAL_FLOWS.md
   ARCHITECTURE.md
   FRONTEND.md
   BACKEND.md
@@ -35,6 +41,7 @@ docs/
       RELEASE_2_SPEC.md
       RELEASE_3_SPEC.md
       RELEASE_4_SPEC.md
+      EXECUTION_PLAN_O1_100.md
 ```
 
 ## 먼저 읽기
@@ -67,6 +74,11 @@ docs/
 
 - `OKR_MVP1_MVP2.md`: Objective 1/2, KR, Hook 루프 기준을 정리한 OKR 원문
 - `OKR_MATCHING_REPORT.md`: OKR 대비 현재 시스템 구현 매칭 결과(달성/부분달성/미달성)
+- `kr1-1/KR1_1_FEATURE_SPEC.md`: KR 1.1 기능 스펙 메인 문서
+- `kr1-1/KR1_1_IMPLEMENTATION_PLAN.md`: KR1.1 전환 정책 구현 범위/우선순위/테스트/완료 체크리스트
+- `kr1-1/KR1_1_TRANSITION_POLICY_DECISION.md`: KR11-TP-v1 결정본(핵심 정책, 예외, 서버 검증, 수용 기준)
+- `kr1-1/KR1_1_WORKFLOW_STATE_POLICY_OPTIONS.md`: 템플릿 전환 시 워크플로우 상태 처리 비교/권장안
+- `kr1-1/KR1_1_FREEFORM_TEMPLATE_BIDIRECTIONAL_FLOWS.md`: 자유폼/템플릿 양방향 사용자 플로우 및 커버리지
 - `business-rules/BUSINESS_RULES.md`: 제품에서 반드시 지켜야 하는 운영 기준과 서버 검증 원칙
 - `business-rules/DOMAIN_GLOSSARY.md`: Unit, Work Graph, Template, Inbox, Decision Graph 등 핵심 도메인 용어 정의
 - `business-rules/SYSTEM_SPEC.md`: 비즈니스 룰을 시스템 요구사항과 영향 영역으로 매핑
@@ -74,6 +86,8 @@ docs/
 - `business-rules/system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
 - `business-rules/system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 템플릿
 - `business-rules/system-spec/RELEASE_4_SPEC.md`: 승인 정책, 알림, 분석, 운영 관리
+- `business-rules/system-spec/EXECUTION_PLAN_O1_100.md`: O1 달성 갭을 닫기 위한 우선순위 실행 계획(Release와 별도 운영)
+- 문서 운영 원칙: `RELEASE_*`는 고정 기준 문서, `EXECUTION_PLAN_*`은 기간성 실행 문서(완료 후 리포트 반영/아카이브)
 
 ## 현재 구현 핵심
 

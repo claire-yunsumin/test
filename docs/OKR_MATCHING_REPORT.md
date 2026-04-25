@@ -17,10 +17,10 @@
 | KR 1.1-형상화 | Objective->KR->Task 형상화 가능 | 자유 노드 생성, parent 연결, 그래프/리스트/보드/백로그 뷰 제공 | 달성 |
 | KR 1.1-정형화 | Template 적용으로 산출물 구조화 | templateId/templateType, formValues 초기화, 레거시 파일 필드 제거 규칙 | 달성 |
 | KR 1.1-멘션 | 노드/필드/노트 멘션으로 논의 시작 | `@`/`#` composer, MEMBER/TASK/FORM_FIELD/NOTE 검증, INVALID_MENTION 처리 | 달성 |
-| KR 1.2-알람 분류 | 결정/논의/인지/결과 흐름 기반 처리 | Inbox read/ack/remind/read-all, 이벤트 라우팅 존재. 단, 4유형 분류 모델의 UI 고정 여부는 문서상 직접 명시 제한적 | 부분달성 |
+| KR 1.2-알람 분류 | 결정/논의/인지/결과 흐름 기반 처리 | 이벤트-컴포넌트 명시 매핑 보강, Inbox read/ack/remind/read-all 액션이 API/UI에서 모두 노출 | 달성 |
 | KR 1.2-Notes 귀속 | Notes/Thread가 결정 대상에 귀속 | 노트 CRUD + 태그 + 참조 링크 + 스레드 결합 구조 정의 | 달성 |
-| KR 1.2-합의/승인 Gate | 승인/반려/보완요청과 결정 추적 | 상태전이 + 타임라인 + 승인정책(글로벌/유닛) 존재. 보완요청 라이프사이클 세부 UX는 구현 확인 필요 | 부분달성 |
-| O1 Retention 측정 | 자발적 재방문/루프 반복 판단 | `/api/analytics/retention`, Objective 1/KR 1.1 지표 노출, 이벤트 기반 계산 규정 | 부분달성 |
+| KR 1.2-합의/승인 Gate | 승인/반려/보완요청과 결정 추적 | 전이 이벤트가 APPROVAL_REQUESTED/APPROVAL_APPROVED/APPROVAL_REJECTED로 세분화되고, Task 상세에서 승인 단계/근거 가시화 | 달성 |
+| O1 Retention 측정 | 자발적 재방문/루프 반복 판단 | `Alarm->Action 전환율`, `결정 귀속 완결률`, `주간 자발 재방문율(7d)`를 API 계산 및 Analytics 화면 자동 판정에 반영 | 달성 |
 
 ## Objective 2 매칭 (AI 활용 + 변경 인지)
 
@@ -37,7 +37,7 @@
 
 | Objective | 판정 | 근거 요약 |
 | --- | --- | --- |
-| Objective 1 (MVP 1) | 부분달성 | 구조화/정형화/멘션/논의 귀속은 구현 근거 충분. 알람 4분류 고정 모델과 승인 라이프사이클 세부는 보강 필요 |
+| Objective 1 (MVP 1) | 달성 | 형상화/정형화/멘션/알람 분류/합의·승인 Gate/자동 판정 지표까지 O1 루프를 구성하는 핵심 구현 완료 |
 | Objective 2 (MVP 2) | 미달성 | AI 생성·검수·가이드 핵심 기능 근거 부재. 변경 인지는 일부 기반만 존재하고 운영 규칙/수용 기준 미완성 |
 
 ## 우선 보강 항목 (구현 순서)

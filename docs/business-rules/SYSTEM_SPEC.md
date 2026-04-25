@@ -2,13 +2,18 @@
 
 이 문서는 `BUSINESS_RULES.md`가 실제 시스템 요구사항으로 내려오는 방식을 정리합니다. 최신 구현 기준은 `apps/api`, `apps/web`, `packages/shared`의 타입과 라우트입니다.
 
-## Release 문서
+## Release / Execution 문서
 
 - `DOMAIN_GLOSSARY.md`: 핵심 도메인 용어 정의
 - `system-spec/RELEASE_1_SPEC.md`: 인증, 권한, 기본 CRUD, 가시성
 - `system-spec/RELEASE_2_SPEC.md`: 협업, 멘션, 타임라인, Inbox
 - `system-spec/RELEASE_3_SPEC.md`: Work Graph, 뷰, 템플릿
 - `system-spec/RELEASE_4_SPEC.md`: 승인 정책, 알림, 분석, 운영 관리
+- `system-spec/EXECUTION_PLAN_O1_100.md`: O1 최종 달성을 위한 우선순위 실행 계획(Release와 별도)
+
+운영 원칙:
+- `RELEASE_*_SPEC.md`는 기준 요구사항을 관리하는 고정 문서입니다.
+- `EXECUTION_PLAN_*.md`는 목표 달성을 위한 실행 계획 문서이며 완료 후 매칭 리포트에 반영하고 아카이브합니다.
 
 ## 1. 인증/인가
 

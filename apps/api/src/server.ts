@@ -142,6 +142,53 @@ function isPendingApprovalStatus(task: Task, statusId: string) {
   return status?.category === "PENDING_APPROVAL";
 }
 
+type StatusMappingResult = {
+  mappedStatusId: string | null;
+  method: "category" | "default" | "legacy" | "manual_required";
+  detail: string;
+};
+
+function mapWorkflowStatusForTemplate(task: Task, template: Template, currentStatusId: string): StatusMappingResult {
+  const targetStatuses = statusesForTemplate(template);
+  const currentTemplate = task.templateId ? byId(data.templates, task.templateId) ?? null : null;
+  const currentStatuses = statusesForTemplate(currentTemplate);
+  const currentCategory = currentStatuses.find((row) => row.id === currentStatusId)?.category;
+
+  if (currentCategory) {
+    const sameCategoryStatus = targetStatuses.find((row) => row.category === currentCategory);
+    if (sameCategoryStatus) {
+      return { mappedStatusId: sameCategoryStatus.id, method: "category", detail: `category:${currentCategory}` };
+    }
+  }
+
+  const defaultStatus = targetStatuses.find((row) => row.isDefault);
+  if (defaultStatus) {
+    return { mappedStatusId: defaultStatus.id, method: "default", detail: "template-default" };
+  }
+
+  const legacyStatusId = LEGACY_STATE_TO_STATUS_ID[task.currentState];
+  if (targetStatuses.some((row) => row.id === legacyStatusId)) {
+    return { mappedStatusId: legacyStatusId, method: "legacy", detail: `legacy:${task.currentState}` };
+  }
+
+  return { mappedStatusId: null, method: "manual_required", detail: "no-compatible-status" };
+}
+
+function validatePolicyAfterTemplateChange(task: Task, template: Template): { valid: boolean; reason: string | null } {
+  if (!task.approvalPolicyId) {
+    const hasGate = transitionsForTemplate(template).some((row) => Boolean(row.onExit?.approvalGate?.enabled));
+    if (hasGate) {
+      return { valid: false, reason: "승인 게이트가 활성화되었지만 정책이 연결되지 않았습니다." };
+    }
+    return { valid: true, reason: null };
+  }
+  const policy = byId(data.approvalPolicies, task.approvalPolicyId);
+  if (!policy || !policy.enabled) {
+    return { valid: false, reason: "기존 승인정책이 비활성화되었거나 삭제되었습니다." };
+  }
+  return { valid: true, reason: null };
+}
+
 function notifyMentions(req: express.Request, task: Task, mentions: Mention[], commentId: string) {
   const recipients = new Set<string>();
   mentions.forEach((mention) => {
@@ -515,6 +562,8 @@ app.post("/api/tasks", (req, res) => {
     dueDate: null,
     lastSeenAtByUser: {},
     approvalPolicyId: body.approvalPolicyId ?? unitDefaultPolicyId,
+    policyReviewRequired: false,
+    policyReviewReason: null,
     updatedAt: now(),
     createdAt: now(),
     formValues: template ? Object.fromEntries(template.formDefinition.map((field) => [field.key, ""])) : {}
@@ -660,18 +709,75 @@ app.patch("/api/tasks/:taskId", (req, res) => {
       payload: { fromParentId: previousParentId, toParentId: patch.parentId }
     });
   }
+  const previousTemplateId = task.templateId;
+  const previousStatusId = task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState];
+
   if (patch.templateId) {
+    const targetTemplate = byId(data.templates, patch.templateId);
+    if (!targetTemplate || !targetTemplate.enabled) {
+      res.status(400).json({ error: "INVALID_TEMPLATE", requestId: req.requestId });
+      return;
+    }
+    const statusMapping = mapWorkflowStatusForTemplate(task, targetTemplate, previousStatusId);
+    if (!statusMapping.mappedStatusId) {
+      res.status(400).json({
+        error: "WORKFLOW_STATUS_MAPPING_REQUIRED",
+        requestId: req.requestId,
+        detail: statusMapping.detail
+      });
+      return;
+    }
     const template = applyTemplate(task, patch.templateId);
     if (!template) {
       res.status(400).json({ error: "INVALID_TEMPLATE", requestId: req.requestId });
       return;
     }
+    task.workflowStatusId = statusMapping.mappedStatusId;
+    task.currentState = stateFromStatusId(statusMapping.mappedStatusId);
+    const policyValidation = validatePolicyAfterTemplateChange(task, template);
+    task.policyReviewRequired = !policyValidation.valid;
+    task.policyReviewReason = policyValidation.reason;
+    if (!policyValidation.valid && task.approvalPolicyId) {
+      const policy = byId(data.approvalPolicies, task.approvalPolicyId);
+      if (!policy || !policy.enabled) task.approvalPolicyId = null;
+    }
+    addTimeline({
+      taskId: task.id,
+      type: previousTemplateId ? "TEMPLATE_REPLACED" : "TEMPLATE_APPLIED",
+      actorId: meId(req),
+      decisionType: null,
+      reason: previousTemplateId ? "템플릿 교체" : "템플릿 적용",
+      referencedNoteIds: [],
+      payload: {
+        fromTemplateId: previousTemplateId,
+        toTemplateId: template.id,
+        statusMapping,
+        policyValidation
+      }
+    });
     addEngagement({ type: "TEMPLATE_APPLIED", actorId: meId(req), taskId: task.id, targetId: template.id, metadata: { fields: template.formDefinition.length } });
   }
   if (patch.templateId === null) {
+    const fromTemplateId = task.templateId;
     task.templateId = null;
     task.templateType = patch.templateType ?? task.templateType;
     task.structureState = "FREEFORM";
+    task.workflowStatusId = LEGACY_STATE_TO_STATUS_ID[task.currentState];
+    task.policyReviewRequired = false;
+    task.policyReviewReason = null;
+    addTimeline({
+      taskId: task.id,
+      type: "TEMPLATE_REMOVED",
+      actorId: meId(req),
+      decisionType: null,
+      reason: "템플릿 해제",
+      referencedNoteIds: [],
+      payload: {
+        fromTemplateId,
+        toTemplateId: null,
+        statusPreserved: true
+      }
+    });
   }
   if (patch.structureState === "FREEFORM" && !patch.templateId) {
     task.structureState = "FREEFORM";
@@ -788,7 +894,15 @@ app.post("/api/tasks/:taskId/transition", (req, res) => {
   else if ((task.workflowPhase ?? "BACKLOG") === "BACKLOG") task.workflowPhase = "ACTIVE";
   task.updatedAt = now();
 
-  const eventType = targetState === "DONE" ? "COMPLETED" : isPendingApprovalStatus(task, targetStatusId) ? "APPROVAL_REQUESTED" : "STATE_TRANSITION";
+  const eventType = body.decisionType === "APPROVE"
+    ? "APPROVAL_APPROVED"
+    : body.decisionType === "REJECT"
+      ? "APPROVAL_REJECTED"
+      : isPendingApprovalStatus(task, targetStatusId)
+        ? "APPROVAL_REQUESTED"
+        : targetState === "DONE"
+          ? "COMPLETED"
+          : "STATE_TRANSITION";
   const event = addTimeline({
     taskId: task.id,
     type: eventType,

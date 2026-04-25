@@ -22,6 +22,9 @@ export type EngagementEventType =
   | "VOLUNTARY_VISIT";
 export type EventType =
   | "TASK_CREATED"
+  | "TEMPLATE_APPLIED"
+  | "TEMPLATE_REPLACED"
+  | "TEMPLATE_REMOVED"
   | "STATE_TRANSITION"
   | "APPROVAL_REQUESTED"
   | "APPROVAL_APPROVED"
@@ -115,6 +118,8 @@ export type Task = {
   dueDate: string | null;
   lastSeenAtByUser: Record<string, string>;
   approvalPolicyId?: string | null;
+  policyReviewRequired?: boolean;
+  policyReviewReason?: string | null;
   updatedAt: string;
   createdAt: string;
   formValues: Record<string, string>;
@@ -291,6 +296,7 @@ export type EngagementEvent = {
 
 export type Analytics = {
   weeklyReturnRate: number;
+  weeklyVoluntaryReturnRate: number;
   notesThreadBalance: string;
   nonDevContributionRate: number;
   noteReferenceRate: number;
@@ -305,6 +311,12 @@ export type Analytics = {
   crossFunctionalThreadRate: number;
   feedbackNodeRevisionRate: number;
   voluntaryVisitCount: number;
+  alarmActionConversionRate: number;
+  decisionClosureRate: number;
+  templateStatusMappingSuccessRate: number;
+  templateManualAdjustmentRate: number;
+  computedAt: string;
+  dataStatus: "ok" | "fallback";
 };
 
 export type AppData = {
@@ -391,6 +403,8 @@ const makeTask = (task: Omit<Task, "tags"> & Partial<Pick<Task, "tags">>): Task 
   workflowStatusId: task.workflowStatusId ?? LEGACY_STATE_TO_STATUS_ID[task.currentState],
   workflowPhase: task.workflowPhase ?? legacyStateToPhase(task.currentState),
   phaseOverride: task.phaseOverride ?? null,
+  policyReviewRequired: task.policyReviewRequired ?? false,
+  policyReviewReason: task.policyReviewReason ?? null,
   tags: task.tags ?? [],
   attachmentIds: task.attachmentIds ?? []
 });
@@ -2200,6 +2214,7 @@ function calculateSeedAnalytics(
 
   return {
     weeklyReturnRate: 0.74,
+    weeklyVoluntaryReturnRate: 0.74,
     notesThreadBalance: `${notes.length}:${comments.length}`,
     nonDevContributionRate: comments.length ? nonDevComments / comments.length : 0,
     noteReferenceRate: comments.length ? comments.filter((comment) => comment.referencedNoteIds.length > 0).length / comments.length : 0,
@@ -2213,6 +2228,12 @@ function calculateSeedAnalytics(
     mentionThreadCount,
     crossFunctionalThreadRate: comments.length ? comments.filter((comment) => comment.authorId !== tasks.find((task) => task.id === comment.taskId)?.ownerId).length / comments.length : 0,
     feedbackNodeRevisionRate: engagement.filter((event) => event.type === "NODE_UPDATED" && event.metadata.afterFeedback === true).length / Math.max(1, mentionThreadCount),
-    voluntaryVisitCount: engagement.filter((event) => event.type === "VOLUNTARY_VISIT").length
+    voluntaryVisitCount: engagement.filter((event) => event.type === "VOLUNTARY_VISIT").length,
+    alarmActionConversionRate: 0.68,
+    decisionClosureRate: 0.72,
+    templateStatusMappingSuccessRate: 1,
+    templateManualAdjustmentRate: 0,
+    computedAt: new Date().toISOString(),
+    dataStatus: "fallback"
   };
 }

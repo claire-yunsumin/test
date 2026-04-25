@@ -26,6 +26,9 @@ export const decisionLabel: Record<DecisionType, string> = {
 };
 export const eventLabel: Record<string, string> = {
   TASK_CREATED: "태스크 생성",
+  TEMPLATE_APPLIED: "템플릿 적용",
+  TEMPLATE_REPLACED: "템플릿 교체",
+  TEMPLATE_REMOVED: "템플릿 해제",
   STATE_TRANSITION: "상태 변경",
   APPROVAL_REQUESTED: "승인 요청",
   APPROVAL_APPROVED: "승인 완료",
