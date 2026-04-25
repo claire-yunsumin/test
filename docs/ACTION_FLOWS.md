@@ -59,7 +59,11 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  A[/tasks] --> B[리스트]
+  HOME[/home] --> A[/tasks]
+  HOME --> J[결정 대기]
+  HOME --> K[내 활성 태스크]
+  HOME --> L[오늘/임박]
+  A --> B[리스트]
   A --> C[보드]
   A --> D[백로그]
   A --> E[결정 그래프]
@@ -78,8 +82,10 @@ flowchart LR
   B --> D[DISCUSSION]
   B --> E[AWARENESS]
   B --> F[RESULT]
-  C --> G[Inbox tabs]
+  C --> G[수신함 탭]
   D --> G
   E --> G
   F --> G
+  A --> H[sourceUserId]
+  H --> I[발신함 추적]
 ```

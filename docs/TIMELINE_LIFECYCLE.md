@@ -34,6 +34,7 @@
 
 - 태스크 상세 우측 패널의 `타임라인` 탭
 - `/api/tasks/:taskId` 상세 응답의 `timeline`
+- 프론트 상세 우측 탭에서는 사용자에게 `변경 기록`으로 표시됩니다.
 - `/api/bootstrap`의 visible task 범위 timeline
 
 현재 상세 우측 패널은 `스레드`와 `타임라인`을 탭으로 전환합니다. 탭 상태는 `rt=timeline` query로 유지됩니다.

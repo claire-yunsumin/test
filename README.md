@@ -34,10 +34,11 @@ npm run test
 
 ## Implemented PRD Slice
 
+- `/home`: first-entry dashboard for decisions to review, active owned/assigned tasks, due-soon work, and watcher updates
 - `/tasks`: task list, board, backlog, quick creation, and task view tabs
 - `/graph`: Decision Graph visualization across hierarchy, context, decisions, and note references
 - `/tasks/:id`: Decision Workspace with system fields, Notes, Thread, Form Output, Timeline, decision modal
-- `/inbox`: DECISION / DISCUSSION / AWARENESS / RESULT tabs backed by API data
+- `/inbox`: two-column received/sent notification workspace with DECISION / DISCUSSION / AWARENESS / RESULT tabs
 - `/settings/templates` and `/templates`: template/workflow metadata CRUD including decision transitions
 - `/settings/access`: RBAC roles, invite flow mock, and member removal
 - `/settings/analytics`: pilot/retention metrics

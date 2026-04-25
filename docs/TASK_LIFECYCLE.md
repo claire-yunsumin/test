@@ -78,6 +78,7 @@
 - `/api/bootstrap`: 현재 사용자 visible task 범위 기준 초기 데이터
 - `/api/tasks/:taskId`: 상세 데이터, visible children, referenceable tasks/notes, permissions 포함
 - 화면:
+  - `/home`: 결정 대기, 내 활성 태스크, 임박 항목, 참관 업데이트 요약
   - `/tasks`: 리스트/보드/백로그/결정 그래프 탭
   - `/tasks/:taskId`: 상세 워크스페이스
   - `/graph`: 그래프 전용 경로

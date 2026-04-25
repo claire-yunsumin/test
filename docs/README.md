@@ -75,12 +75,15 @@ docs/
 
 - 인증은 `X-Demo-User-Id` 헤더 기반입니다.
 - 역할은 `MEMBER < OWNER < ADMIN < SUPER_ADMIN` 순서입니다.
+- 첫 진입 화면은 `/home`이며, 결정/논의 Inbox, 내 활성 태스크, 임박 항목, 참관 업데이트를 요약합니다.
+- 알림함(`/inbox`)은 수신함/발신함 2열 구조이며, 수신함 안에 `DECISION`, `DISCUSSION`, `AWARENESS`, `RESULT` 탭이 있습니다.
 - 태스크는 `unitId`, `folderId`, `listId`, `parentId` 맥락을 가집니다.
 - 좌측 `Shell`의 Explorer는 Unit·Folder·List를 트리로 보여 주며(팀/채널 UI는 **IA 참고**), List 행에 채널의 `#` 표기는 쓰지 않습니다(스레드의 `#` 노트 커맨드와 구분).
 - Work Graph는 `FREEFORM` 형상화와 `TEMPLATED` 정형화를 구분합니다.
 - Template은 `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema`를 가집니다.
 - 스레드는 입력 중 `@` 또는 `#` 커맨드 검색으로 멘션/노트 참조를 선택합니다.
-- 태스크 상세 우측 영역은 `스레드`와 `타임라인` 탭으로 전환됩니다.
+- 태스크 상세 우측 영역은 `논의`와 `변경 기록` 탭으로 전환됩니다.
+- Decision Graph Inspector는 임박, 근거 없음, 논의 후 결정 없음 같은 액션 신호를 표시합니다.
 - 태스크 뷰는 `리스트`, `보드`, `백로그`, `결정 그래프`로 구성됩니다.
-- 태스크 필드 수정은 task owner, assignee, unit owner, admin 계열만 가능하며 watcher는 read-only입니다.
+- 태스크 필드 수정은 task owner, assignee, unit owner, admin 계열만 가능하며 watcher는 read-only입니다. 프론트 상세 화면도 이 권한을 따라 시스템 필드를 잠급니다.
 - Analytics는 `engagement` 이벤트와 현재 콘텐츠 상태를 기반으로 계산합니다.

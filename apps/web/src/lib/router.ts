@@ -5,7 +5,7 @@ export type Route = {
 };
 
 export function currentRoute(): Route {
-  const rawPath = window.location.pathname === "/" ? "/tasks" : window.location.pathname;
+  const rawPath = window.location.pathname === "/" ? "/home" : window.location.pathname;
   const path = rawPath === "/hierarchy" ? "/tasks" : rawPath;
   const taskMatch = path.match(/^\/tasks\/([^/]+)/);
   const unitMatch = path.match(/^\/units\/([^/]+)\/settings$/);

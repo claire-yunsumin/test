@@ -10,12 +10,14 @@ function headerBreadcrumb(route: string, taskId: string | undefined, tasks: Task
   const task = taskId ? tasks.find((row) => row.id === taskId) : null;
   if (route.startsWith("/tasks/") && task) {
     return [
+      { label: "홈", path: "/home" },
       { label: "태스크", path: "/tasks" },
       { label: task.title, path: `/tasks/${task.id}` }
     ];
   }
+  if (route === "/home") return [{ label: "홈", path: "/home" }];
   if (route === "/tasks") return [{ label: "태스크", path: "/tasks" }];
-  if (route === "/graph") return [{ label: "태스크", path: "/tasks" }, { label: "결정 그래프", path: "/graph" }];
+  if (route === "/graph") return [{ label: "홈", path: "/home" }, { label: "태스크", path: "/tasks" }, { label: "결정 그래프", path: "/graph" }];
   if (route === "/inbox") return [{ label: "알림함", path: "/inbox" }];
   if (route === "/settings/templates" || route === "/templates") return [{ label: "설정", path: "/settings/profile" }, { label: "템플릿 센터", path: "/settings/templates" }];
   if (route === "/settings" || route === "/settings/profile") return [{ label: "설정", path: "/settings/profile" }, { label: "프로필", path: "/settings/profile" }];
@@ -26,7 +28,7 @@ function headerBreadcrumb(route: string, taskId: string | undefined, tasks: Task
   if (route === "/settings/access" || route === "/settings/members" || route === "/settings/permissions") return [{ label: "설정", path: "/settings/profile" }, { label: "사용자 및 권한", path: "/settings/access" }];
   if (route === "/settings/analytics") return [{ label: "설정", path: "/settings/profile" }, { label: "분석", path: "/settings/analytics" }];
   if (route === "/settings/alerts") return [{ label: "설정", path: "/settings/profile" }, { label: "알림 설정", path: "/settings/alerts" }];
-  return [{ label: "태스크", path: "/tasks" }];
+  return [{ label: "홈", path: "/home" }];
 }
 
 function teamInitials(name: string) {
@@ -244,6 +246,7 @@ export function Shell({
     .filter((task) => !globalQuery.trim() || `${task.title} ${task.description}`.toLowerCase().includes(globalQuery.toLowerCase()))
     .slice(0, 8);
   const links = [
+    { path: "/home", label: "홈", mark: "H" },
     { path: "/inbox", label: "알림함", mark: "I", unread },
     { path: "/tasks", label: "태스크", mark: "T" },
     { path: "/settings", label: "설정", mark: "S" }
@@ -267,6 +270,8 @@ export function Shell({
   const settingsItems = [...currentWorkspaceSettingsItems, ...globalManagementItems];
   const settingsRoutes = new Set(["/settings", "/settings/unit", "/templates", "/settings/alerts", ...settingsItems.map((item) => item.path)]);
   const isSettingsRoute = settingsRoutes.has(route) || /^\/units\/[^/]+\/settings$/.test(route);
+  const showTaskExplorer = route === "/tasks" || route === "/graph" || route.startsWith("/tasks/");
+  const shellContextMode = showTaskExplorer ? "task-context" : isSettingsRoute ? "settings-context" : "no-context";
   const workspaceUnitTitle = activeUnit?.name ?? "전역 유닛 스페이스";
   const workspaceScopeLabel = selectedListId ? "리스트 단위" : selectedUnitId ? "유닛 단위" : "전사 단위";
   const activeList = lists.find((list) => list.id === selectedListId);
@@ -325,10 +330,10 @@ export function Shell({
   };
 
   return (
-    <div className={`app-shell ${gnbExpanded ? "gnb-expanded" : ""}`}>
+    <div className={`app-shell ${shellContextMode} ${gnbExpanded ? "gnb-expanded" : ""}`}>
       <aside className={`gnb-sidebar ${gnbExpanded ? "expanded" : "collapsed"}`}>
         <section className="rail-brand">
-          <button className="rail-logo" onClick={() => onNavigate("/tasks")} title="SelvasIn4 HWE">H</button>
+          <button className="rail-logo" onClick={() => onNavigate("/home")} title="SelvasIn4 HWE">H</button>
           <small>HWE</small>
         </section>
         <nav className="nav-list">
@@ -691,11 +696,13 @@ export function Shell({
                 </span>
               ))}
             </nav>
-            <div className="context-bar-signals">
-              <span>{workspaceUnitTitle}</span>
-              <span>{activeFolder?.name ?? "전체 폴더"}</span>
-              <span>{activeList?.name ?? "전체 리스트"}</span>
-            </div>
+            {showTaskExplorer && (
+              <div className="context-bar-signals">
+                <span>{workspaceUnitTitle}</span>
+                <span>{activeFolder?.name ?? "전체 폴더"}</span>
+                <span>{activeList?.name ?? "전체 리스트"}</span>
+              </div>
+            )}
           </div>
           {children}
         </main>

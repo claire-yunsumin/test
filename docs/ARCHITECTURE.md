@@ -19,7 +19,7 @@ apps/
     src/components/ui.tsx       Badge, Tabs, Select, FilterShell 등 공통 UI
     src/components/WorkspaceSurfaceIcons.tsx  Explorer 유닛 범위·리스트 시각( # 미사용 )
     src/features/tasks/         TaskViewTabs 등 태스크 뷰 UI 조각
-    src/pages/                  Tasks, TaskDetail, Inbox, Graph, Analytics, settings 등
+    src/pages/                  Home, Tasks, TaskDetail, Inbox, Graph, Analytics, settings 등
     src/lib/api.ts              fetch 래퍼와 에러 메시지 변환
     src/lib/router.ts           클라이언트 라우팅 유틸
     src/lib/viewTypes.ts        API 직렬화 결과에 맞춘 뷰 타입
@@ -35,7 +35,7 @@ docs/
 
 - `packages/shared`는 도메인 언어의 기준입니다. `Task`, `Template`, `Mention`, `ApprovalPolicy`, `Analytics`, workflow enum이 여기서 시작됩니다.
 - `apps/api`는 신뢰 경계입니다. 프론트에서 버튼을 숨기더라도 서버는 인증, 역할, 가시성, 입력 검증을 반드시 수행합니다.
-- `apps/web`은 운영 화면과 상호작용을 담당합니다. `layout/Shell`의 GNB·Explorer(유닛/폴더/리스트), 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 백로그/보드 조작이 이곳에 있습니다.
+- `apps/web`은 운영 화면과 상호작용을 담당합니다. `/home` 대시보드, `layout/Shell`의 GNB·태스크 전용 Explorer(유닛/폴더/리스트), 태스크 뷰 탭, 상세 우측 패널, 커맨드형 멘션, 백로그/보드 조작이 이곳에 있습니다.
 - `docs`는 코드의 현재 상태를 설명하는 기준 문서입니다. enum, API, 역할 정책이 바뀌면 함께 갱신해야 합니다.
 
 ## 현재 제품 모델
@@ -47,6 +47,7 @@ docs/
 - Decision Graph는 별도 DB가 아니라 `tasks`, `notes`, `comments`, `timeline`, `referencedNoteIds`, `parentId`를 프론트에서 투영한 뷰입니다.
 - Analytics는 저장된 `engagement` 이벤트와 콘텐츠 상태에서 계산됩니다.
 - 태스크 가시성과 태스크 수정 권한은 분리됩니다. watcher는 볼 수 있지만, 태스크 필드 수정은 owner/assignee/unit owner/admin 계열만 가능합니다.
+- 첫 진입 화면은 `/home`입니다. 전체 태스크 목록보다 결정 대기, 내 담당/소유 태스크, 임박 항목, 참관 업데이트를 먼저 노출하며, 이전 태스크 유닛 필터와 무관하게 전체 visible 범위를 사용합니다.
 - Work Graph parent 변경은 cycle을 만들 수 없도록 서버에서 검증합니다.
 
 ## 주요 아키텍처 결정
@@ -54,7 +55,10 @@ docs/
 - API는 현재 인메모리 데이터지만, `domain/store.ts`에 모여 있어 DB 리포지토리로 교체하기 쉽습니다.
 - `server.ts`가 아직 크지만, 모든 라우트가 한 파일에 있어 현재 수직 슬라이스 검증은 빠릅니다.
 - 태스크 메뉴에서 `리스트`, `보드`, `백로그`, `결정 그래프`를 동일한 뷰 탭으로 다룹니다.
-- 태스크 상세 우측 영역은 `스레드`와 `타임라인`을 탭으로 전환합니다.
+- GNB의 `홈`은 사용자 액션 큐이고, `태스크`는 전체 작업대입니다.
+- Unit/Folder/List Explorer는 태스크 작업대의 범위 선택 도구이므로 홈/알림함에서는 숨기고 태스크 대메뉴에서만 노출합니다.
+- 태스크 상세 우측 영역은 `논의`와 `변경 기록`을 탭으로 전환합니다.
+- Decision Graph Inspector는 그래프를 탐색용 지도에 그치지 않게 임박, 근거 없음, 논의 후 결정 없음 같은 액션 신호를 계산합니다.
 - 스레드 입력은 후보 칩을 상시 노출하지 않고, `@`/`#` 커맨드 검색 메뉴로 멘션/노트 참조를 선택합니다.
 
 ## 현재 한계

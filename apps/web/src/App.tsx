@@ -7,6 +7,7 @@ import { currentRoute, go, type Route } from "./lib/router";
 import type { TaskView } from "./lib/viewTypes";
 import { AnalyticsView } from "./pages/AnalyticsPage";
 import { DecisionGraphView } from "./pages/DecisionGraphPage";
+import { HomeView } from "./pages/HomePage";
 import { InboxView } from "./pages/InboxPage";
 import { TaskWorkspace } from "./pages/TaskDetailPage";
 import { TasksView } from "./pages/TasksPage";
@@ -112,7 +113,9 @@ export function App() {
       onNavigate={go}
       onReload={reload}
     >
-      {route.path.startsWith("/tasks/") && route.taskId ? (
+      {route.path === "/home" ? (
+        <HomeView data={data} tasks={data.tasks as TaskView[]} />
+      ) : route.path.startsWith("/tasks/") && route.taskId ? (
         <TaskWorkspace taskId={route.taskId} me={data.me} templates={data.templates} onReload={reload} />
       ) : route.path === "/tasks" ? (
         <TasksView

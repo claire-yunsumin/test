@@ -2,7 +2,7 @@
 
 ## 한 줄 요약
 
-현재 프론트엔드는 `React + Vite` 단일 앱입니다. `App.tsx`는 `/api/bootstrap`과 라우트 분기, `Shell`이 GNB·Unit/Folder/List Explorer·본문 그리드를 담당하며, 화면별 본문은 `pages/*`와 `features/tasks/*`가 조합합니다. `components/ui.tsx`는 공통 UI 프리미티브를 제공합니다.
+현재 프론트엔드는 `React + Vite` 단일 앱입니다. `App.tsx`는 `/api/bootstrap`과 라우트 분기, `Shell`이 GNB·Unit/Folder/List Explorer·본문 그리드를 담당하며, 첫 진입은 `/home` 대시보드가 받습니다. Unit/Folder/List Explorer는 태스크 작업대(`/tasks`, `/tasks/:id`, `/graph`)에서만 펼쳐집니다. 화면별 본문은 `pages/*`와 `features/tasks/*`가 조합하고, `components/ui.tsx`는 공통 UI 프리미티브를 제공합니다.
 
 ## 파일 구조
 
@@ -14,6 +14,7 @@ apps/web/src/
   components/ui.tsx              PageHeader, Badge, Tabs, Select, FilterShell, Centered 등
   components/WorkspaceSurfaceIcons.tsx  Explorer에서 리스트/유닛 범위 아이콘(#는 노트 커맨드용이므로 미사용)
   features/tasks/TaskViewTabs.tsx  태스크 뷰 모드(리스트/보드/백로그/그래프) 탭
+  pages/HomePage.tsx             결정 대기·내 태스크·임박 항목 중심 홈 대시보드
   pages/TasksPage.tsx            태스크 작업대
   pages/TaskDetailPage.tsx       태스크 상세·우측 패널
   pages/InboxPage.tsx, DecisionGraphPage.tsx, AnalyticsPage.tsx, HierarchyPage.tsx
@@ -27,12 +28,13 @@ apps/web/src/
 
 ## 화면 구성
 
+- 홈: `/`와 `/home`은 유닛 필터와 무관하게 결정 대기, 내 활성 태스크, 오늘/임박 항목, 참관 업데이트를 우선 보여 줍니다.
 - 태스크 뷰: `리스트`, `보드`, `백로그`, `결정 그래프`
-- 태스크 상세: 시스템 필드, 노트/Form Output 본문, 우측 `스레드/타임라인` 탭
+- 태스크 상세: 시스템 필드, 노트/Form Output 본문, 우측 `논의/변경 기록` 탭
 - 스레드 입력: `@` 커맨드로 사람/노드/Form 필드 검색, `#` 커맨드로 노트 검색
-- 그래프 뷰: `/graph` 라우트이면서 태스크 뷰 탭에서도 접근
-- Inbox: `DECISION`, `DISCUSSION`, `AWARENESS`, `RESULT` 탭
-- 좌측 Explorer: **Unit → Folder → List** IA(팀즈 팀/채널은 구조 참고용). 리스트 행은 `#` 대신 전용 아이콘으로 표시해 스레드의 `#` 노트 커맨드와 구분합니다.
+- 그래프 뷰: `/graph` 라우트이면서 태스크 뷰 탭에서도 접근. 우측 Inspector는 임박, 근거 없음, 논의 후 결정 없음 같은 액션 신호를 제공합니다.
+- Inbox: 수신함/발신함 2열 구조입니다. 수신함은 더 넓은 영역에서 `DECISION`, `DISCUSSION`, `AWARENESS`, `RESULT` 탭과 읽음 처리를 제공하고, 발신함은 보낸 요청/알림의 열람·SLA·리마인드 상태를 추적합니다.
+- 좌측 Explorer: 태스크 대메뉴에서만 펼쳐지는 **Unit → Folder → List** IA(팀즈 팀/채널은 구조 참고용). 리스트 행은 `#` 대신 전용 아이콘으로 표시해 스레드의 `#` 노트 커맨드와 구분합니다.
 - 설정/관리: 프로필, 유닛, 전역 유닛, 접근제어, 멤버, 권한, 승인정책, 템플릿, 알림, 분석
 
 ## 태스크 뷰
@@ -58,8 +60,8 @@ apps/web/src/
 - 좌측: 시스템 필드, 소유자, 우선순위, 기한, 담당자/참관자, 하위 항목/노트/스레드/파일 수
 - 중앙: 노트, Form Output, 검수 기준
 - 우측: `TaskRightPanel` (`TaskDetailPage.tsx`)
-  - `스레드` 탭: 댓글, 멘션, 노트 참조, 커맨드형 composer
-  - `타임라인` 탭: 이벤트 로그, 세션 묶음, 전체 펼침/접기
+  - `논의` 탭: 댓글, 멘션, 노트 참조, 커맨드형 composer
+  - `변경 기록` 탭: 이벤트 로그, 세션 묶음, 전체 펼침/접기
 - 하단: 결정 액션 바
 
 우측 탭은 `rt=timeline` query로 상태가 유지됩니다.
@@ -77,6 +79,7 @@ apps/web/src/
 ## 데이터 로딩
 
 - 앱 최초 로딩은 `/api/bootstrap`입니다.
+- `/`는 클라이언트 라우터에서 `/home`으로 해석됩니다.
 - 상세 진입은 `/api/tasks/:taskId`입니다.
 - 변경 액션 후 `onReload`로 서버 상태를 다시 가져옵니다.
 - `request()`는 `Content-Type`과 `X-Demo-User-Id`를 기본으로 보내고, 오류를 사용자 메시지로 변환합니다.
@@ -87,6 +90,7 @@ apps/web/src/
 - 실제 보안은 API가 강제합니다.
 - Form Output 편집은 서버의 `permissions.canEditForm`을 따릅니다.
 - 태스크 필드 편집과 첨부 변경은 서버의 `permissions.canEditTask`를 따릅니다.
+- 태스크 상세는 `permissions.canEditTask=false`인 watcher/read-only 사용자에게 제목, 담당자/공유, 기한, 우선순위, 상태 컨트롤을 비활성화하고 읽기 전용 안내를 노출합니다.
 
 ## 유지보수 포인트
 

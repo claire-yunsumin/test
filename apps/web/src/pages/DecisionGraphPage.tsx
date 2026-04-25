@@ -66,6 +66,15 @@ import {
 
 type GraphLayer = "context" | "decision" | "refs";
 
+function graphDaysUntil(value: string | null) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(value);
+  due.setHours(0, 0, 0, 0);
+  return Math.ceil((due.getTime() - today.getTime()) / 86400000);
+}
+
 export function DecisionGraphView({ data }: { data: AppData }) {
   const tasks = data.tasks as TaskView[];
   const [focusId, setFocusId] = useState("ALL");
@@ -155,6 +164,22 @@ export function DecisionGraphView({ data }: { data: AppData }) {
   const noteCounts = new Map(graphTasks.map((task) => [task.id, data.notes.filter((note) => note.taskId === task.id).length]));
   const commentCounts = new Map(graphTasks.map((task) => [task.id, data.comments.filter((comment) => comment.taskId === task.id).length]));
   const decisionCounts = new Map(graphTasks.map((task) => [task.id, data.timeline.filter((event) => event.taskId === task.id && event.decisionType).length]));
+  const actionSignals = graphTasks
+    .map((task) => {
+      const dueIn = graphDaysUntil(task.dueDate);
+      const notes = noteCounts.get(task.id) ?? 0;
+      const comments = commentCounts.get(task.id) ?? 0;
+      const decisions = decisionCounts.get(task.id) ?? 0;
+      const labels = [
+        dueIn <= 7 && task.currentState !== "DONE" && task.currentState !== "CANCELED" ? (dueIn <= 0 ? "오늘 마감" : `${dueIn}일 남음`) : "",
+        notes === 0 && task.currentState !== "DONE" ? "근거 없음" : "",
+        comments > 0 && decisions === 0 && task.currentState === "IN_PROGRESS" ? "논의 후 결정 없음" : ""
+      ].filter(Boolean);
+      return { task, labels, score: labels.length * 10 + (task.priority === "URGENT" ? 4 : task.priority === "HIGH" ? 3 : task.priority === "MEDIUM" ? 2 : 1) };
+    })
+    .filter((item) => item.labels.length > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
   const refEdges = data.comments.flatMap((comment) =>
     comment.referencedNoteIds
       .map((noteId) => ({ sourceTaskId: comment.taskId, targetTaskId: noteMap.get(noteId)?.taskId, noteId }))
@@ -330,6 +355,19 @@ export function DecisionGraphView({ data }: { data: AppData }) {
             <small>초점</small>
             <strong>{selectedTask ? selectedTask.title : "전체 그래프"}</strong>
             <p>{selectedTask ? selectedTask.description : "태스크 계층, 노트, 스레드, 타임라인, # 참조가 한 화면에서 연결됩니다."}</p>
+          </div>
+          <div className="graph-inspector-card graph-action-card">
+            <small>액션 신호</small>
+            <strong>{actionSignals.length ? "확인 필요" : "정상"}</strong>
+            <div className="graph-action-list">
+              {actionSignals.map(({ task, labels }) => (
+                <button key={task.id} className="graph-action-row" onClick={() => go(`/tasks/${task.id}`)}>
+                  <span>{task.title}</span>
+                  <em>{labels.join(" · ")}</em>
+                </button>
+              ))}
+              {!actionSignals.length && <p>현재 그래프에 즉시 확인할 신호가 없습니다.</p>}
+            </div>
           </div>
           <div className="graph-inspector-card">
             <small>축적 행위</small>

@@ -110,50 +110,60 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
         <span><b>{sentSummary.read}/{sentSummary.total}</b><small>sent read</small></span>
         <span><b>{slaHours}h</b><small>SLA</small></span>
       </div>
-      <div className="inbox-controls">
-        <Tabs variant="primary" value={tab} onChange={(v) => setTab(v as InboxComponent)} tabs={INBOX_COMPONENTS.map((item) => ({ value: item.value, label: item.label, count: data.inbox.filter((row) => row.userId === meId && row.componentType === item.value && !row.readAt).length }))} />
-        <div className="row-actions left">
-          <button className="button secondary" onClick={() => void markAllRead(tab)}>현재 탭 모두 읽음</button>
-          <button className="button secondary" onClick={() => void markAllRead()}>전체 모두 읽음</button>
-        </div>
-      </div>
-      <div className="list-panel">
-        {items.map((item) => (
-          <div className={`inbox-row ${item.readAt ? "" : "unread"}`} key={item.id}>
-            <div>
-              <Badge tone={item.componentType === "DECISION" ? "amber" : item.componentType === "DISCUSSION" ? "blue" : item.componentType === "RESULT" ? "green" : "slate"}>
-                {eventLabel[item.eventType] ?? item.eventType}
-              </Badge>
-              <h3>{item.title}</h3>
-              <p>{item.message}</p>
-              <small className="inbox-row-meta-line">
-                <span>{taskMap.get(item.taskId)?.title}</span>
-                <span>{item.readAt ? "read" : "unread"}</span>
-                <span>{elapsed(item.createdAt)}</span>
-              </small>
-            </div>
-            <div className="row-actions">
-              <button className="button secondary" onClick={() => go(`/tasks/${item.taskId}`)}>열기</button>
-              <button className="button secondary" onClick={() => void markRead(item.id)}>{item.readAt ? "안 읽음" : "읽음"}</button>
+      <div className="inbox-layout">
+        <section className="list-panel inbox-received-panel">
+          <div className="inbox-panel-head">
+            <PanelTitle title="수신함" />
+            <div className="row-actions left">
+              <button className="button secondary" onClick={() => void markAllRead(tab)}>현재 탭 모두 읽음</button>
+              <button className="button secondary" onClick={() => void markAllRead()}>전체 모두 읽음</button>
             </div>
           </div>
-        ))}
-      </div>
-      <section className="panel">
-        <PanelHeader title="내가 보낸 요청/알림 추적" />
-        <p className="muted">수신자 열람 {sentSummary.read} / 수신자 미열람 {Math.max(0, sentSummary.total - sentSummary.read)} / SLA 초과 {sentSummary.overdue} / 전체 {sentSummary.total}</p>
-        <div className="list-panel">
+          <div className="inbox-controls">
+            <Tabs variant="primary" value={tab} onChange={(v) => setTab(v as InboxComponent)} tabs={INBOX_COMPONENTS.map((item) => ({ value: item.value, label: item.label, count: data.inbox.filter((row) => row.userId === meId && row.componentType === item.value && !row.readAt).length }))} />
+          </div>
+          {items.map((item) => (
+            <div className={`inbox-row ${item.readAt ? "" : "unread"}`} key={item.id}>
+              <div>
+                <Badge tone={item.componentType === "DECISION" ? "amber" : item.componentType === "DISCUSSION" ? "blue" : item.componentType === "RESULT" ? "green" : "slate"}>
+                  {eventLabel[item.eventType] ?? item.eventType}
+                </Badge>
+                <h3>{item.title}</h3>
+                <p>{item.message}</p>
+                <small className="inbox-row-meta-line">
+                  <span>{taskMap.get(item.taskId)?.title}</span>
+                  <span>{item.readAt ? "읽음" : "미확인"}</span>
+                  <span>{elapsed(item.createdAt)}</span>
+                </small>
+              </div>
+              <div className="row-actions">
+                <button className="button secondary" onClick={() => go(`/tasks/${item.taskId}`)}>열기</button>
+                <button className="button secondary" onClick={() => void markRead(item.id)}>{item.readAt ? "안 읽음" : "읽음"}</button>
+              </div>
+            </div>
+          ))}
+          {items.length === 0 && <p className="inbox-empty">현재 탭의 수신 알림이 없습니다.</p>}
+        </section>
+        <aside className="list-panel inbox-sent-panel">
+          <div className="inbox-panel-head">
+            <PanelTitle title="발신함" />
+            <span className="signal-chip">{sentSummary.read}/{sentSummary.total}</span>
+          </div>
+          <p className="inbox-sent-summary">
+            수신자 미열람 {Math.max(0, sentSummary.total - sentSummary.read)} · SLA 초과 {sentSummary.overdue}
+          </p>
           {sentItems.slice(0, 30).map((item) => (
-            <div className={`inbox-row ${item.readAt ? "" : "unread"}`} key={`sent-${item.id}`}>
+            <div className={`inbox-row inbox-sent-row ${item.readAt ? "" : "unread"}`} key={`sent-${item.id}`}>
               <div>
                 <Badge tone={item.readAt ? "green" : "amber"}>{item.readAt ? "수신자 열람" : "수신자 미열람"}</Badge>
                 <h3>{item.title}</h3>
                 <p>{item.message}</p>
-                <small>
-                  {taskMap.get(item.taskId)?.title} · 수신자 {data.members.find((m) => m.id === item.userId)?.name ?? item.userId}
-                  {item.readAt ? ` · 열람 ${elapsed(item.readAt)}` : ""}
-                  {!item.readAt && ((Date.now() - new Date(item.createdAt).getTime()) / 36e5 >= slaHours) ? " · SLA 지연" : ""}
-                  {(item.remindCount ?? 0) > 0 ? ` · 리마인드 ${item.remindCount}회` : ""}
+                <small className="inbox-row-meta-line">
+                  <span>{taskMap.get(item.taskId)?.title}</span>
+                  <span>수신자 {data.members.find((m) => m.id === item.userId)?.name ?? item.userId}</span>
+                  {item.readAt ? <span>열람 {elapsed(item.readAt)}</span> : null}
+                  {!item.readAt && ((Date.now() - new Date(item.createdAt).getTime()) / 36e5 >= slaHours) ? <span>SLA 지연</span> : null}
+                  {(item.remindCount ?? 0) > 0 ? <span>리마인드 {item.remindCount}회</span> : null}
                 </small>
               </div>
               <div className="row-actions">
@@ -162,9 +172,9 @@ export function InboxView({ data, onReload }: { data: AppData; onReload: () => P
               </div>
             </div>
           ))}
-          {sentItems.length === 0 && <p className="muted">보낸 요청/알림이 없습니다.</p>}
-        </div>
-      </section>
+          {sentItems.length === 0 && <p className="inbox-empty">보낸 요청/알림이 없습니다.</p>}
+        </aside>
+      </div>
     </section>
   );
 }

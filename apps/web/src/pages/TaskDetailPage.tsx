@@ -108,6 +108,7 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
 
   const saveTask = async (nextDraft = taskDraft, quiet = false) => {
     if (!nextDraft.title.trim() || !detail || !task) return;
+    if (detail.permissions?.canEditTask === false) return;
     if (nextDraft.title === detail.task.title) return;
     try {
       if (quiet) setAutoSaving(true);
@@ -129,15 +130,20 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
 
   useDebouncedEffect(() => {
     if (!detail || loadedTaskId.current !== detail.task.id) return;
+    if (detail.permissions?.canEditTask === false) return;
     if (taskDraft.title === detail.task.title) return;
     void saveTask(taskDraft, true);
   }, [taskDraft.title, detail?.task.id], 1100);
 
   if (!detail || !task) return <Centered><div className="loader" /></Centered>;
 
-	  const { parent, notes, attachments = [], referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
-  const canEditTask = permissions?.canEditTask ?? ["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
-  const canEditForm = permissions?.canEditForm ?? ["MEMBER", "OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
+  const { parent, notes, attachments = [], referenceableNotes = notes, referenceableTasks = [task], comments, timeline, members, children, permissions } = detail;
+  const fallbackCanEdit = me.role === "ADMIN" || me.role === "SUPER_ADMIN" || task.ownerId === me.id || task.assigneeIds.includes(me.id);
+  const canEditTask = permissions?.canEditTask ?? fallbackCanEdit;
+  const canEditForm = permissions?.canEditForm ?? fallbackCanEdit;
+  const permissionStatus = canEditTask
+    ? "편집 가능 · 담당자, 소유자, 유닛 오너 또는 관리자"
+    : "읽기 전용 · 제목, 담당자, 공유, 기한, 우선순위, 상태는 담당자/소유자/유닛 오너만 수정";
   const changed = hasChangedSinceSeen(task, parent, me.id);
   const canApprove = ["OWNER", "ADMIN", "SUPER_ADMIN"].includes(me.role);
   const canDeleteTask = me.role === "ADMIN" || me.role === "SUPER_ADMIN" || task.ownerId === me.id;
@@ -224,6 +230,8 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
                 className="task-title-input"
                 value={taskDraft.title}
                 maxLength={120}
+                disabled={!canEditTask}
+                title={canEditTask ? "태스크 제목" : "읽기 전용: 담당자, 소유자 또는 유닛 오너만 제목을 수정할 수 있습니다."}
                 onChange={(event) => setTaskDraft((prev) => ({ ...prev, title: event.target.value }))}
                 onBlur={() => void saveTask(taskDraft, true)}
                 aria-label="태스크 제목"
@@ -242,6 +250,11 @@ export function TaskWorkspace({ taskId, me, templates, onReload }: { taskId: str
               <span>notes {notes.length}</span>
               <span>threads {comments.length}</span>
               <span>children {children.length}</span>
+            </div>
+            <div className={`permission-strip ${canEditTask ? "editable" : "readonly"}`}>
+              <strong>{canEditTask ? "편집 가능" : "읽기 전용"}</strong>
+              <span>{permissionStatus}</span>
+              {!canEditForm && <em>양식 산출물도 읽기 전용</em>}
             </div>
             <SystemFieldsPanel
               task={task}
@@ -331,8 +344,8 @@ function TaskRightPanel({
         value={tab}
         onChange={(value) => setTab(value as typeof tab)}
         tabs={[
-          { value: "thread", label: "스레드", count: comments.length },
-          { value: "timeline", label: "타임라인", count: timeline.length }
+          { value: "thread", label: "논의", count: comments.length },
+          { value: "timeline", label: "변경 기록", count: timeline.length }
         ]}
       />
       {tab === "thread" ? (
@@ -636,6 +649,8 @@ function SystemFieldsPanel({
           <button
             type="button"
             className="member-share-trigger"
+            disabled={!canEditTask}
+            title={canEditTask ? "담당자/공유 수정" : "담당자/공유 수정 권한이 없습니다."}
             onClick={() => setShareOpen((prev) => !prev)}
             aria-haspopup="dialog"
             aria-expanded={shareOpen}
@@ -645,7 +660,7 @@ function SystemFieldsPanel({
           </button>
           {shareOpen && (
             <div className="member-share-popover">
-              <input value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="이름, 이메일, 조직 검색" />
+              <input value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} placeholder="이름, 이메일, 조직 검색" disabled={!canEditTask} />
               <div className="member-share-list">
                 {groupedMembers.map(([unit, rows]) => (
                   <div key={unit} className="member-share-group">
@@ -665,6 +680,7 @@ function SystemFieldsPanel({
                             ["WATCHER", "참관"],
                             ["ASSIGNEE", "담당"]
                           ]}
+                          disabled={!canEditTask}
                         />
                       </div>
                     ))}
@@ -681,6 +697,8 @@ function SystemFieldsPanel({
           type="date"
           value={task.dueDate?.slice(0, 10) ?? ""}
           onChange={(event) => void patchTask("dueDate", { dueDate: event.target.value || null })}
+          disabled={!canEditTask}
+          title={canEditTask ? "기한 수정" : "기한 수정 권한이 없습니다."}
         />
       </Meta>
       <Meta label="우선순위">
@@ -689,13 +707,15 @@ function SystemFieldsPanel({
           value={task.priority}
           onChange={(priority) => void patchTask("priority", { priority: priority as TaskView["priority"] })}
           options={["LOW", "MEDIUM", "HIGH", "URGENT"].map((value) => [value, priorityLabel[value as TaskView["priority"]]])}
+          disabled={!canEditTask}
         />
       </Meta>
       <Meta label="상태">
         <div className="next-action-wrap" ref={nextActionRef}>
           <button
             className="state-action-trigger"
-            title="상태 및 다음 액션"
+            disabled={!canEditTask}
+            title={canEditTask ? "상태 및 다음 액션" : "상태 수정 권한이 없습니다."}
             onClick={() => setNextActionOpen((prev) => !prev)}
           >
             <Badge tone={STATE_META[decisionState].tone}>{STATE_META[decisionState].label}</Badge>
@@ -1607,7 +1627,7 @@ function TimelinePanel({ timeline, notes, members }: { timeline: TimelineEvent[]
   return (
     <section className="panel">
       <PanelHeader
-        title="타임라인"
+        title="변경 기록"
         action={hiddenSessionIds.length > 0 ? (
           <button className="button secondary" onClick={() => setOpenSessions(allOpen ? new Set() : new Set(hiddenSessionIds))}>
             {allOpen ? "접기" : "전체 펼침"}
