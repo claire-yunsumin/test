@@ -61,11 +61,12 @@ apps/web/src/
 - 중앙: 노트, Form Output, 검수 기준
 - 우측: `TaskRightPanel` (`TaskDetailPage.tsx`)
   - 상단 `관계/구조 맥락` 1-depth 미니맵(상/하위 노드 클릭 이동, head/tail 요약)
+  - 미니맵 바로 아래 `의존성/영향 범위` 블록(`Depends on`, `Blocks`, `Affected`)과 관련 태스크 이동
   - `논의` 탭: 댓글, 멘션, 노트 참조, 커맨드형 composer
   - `변경 기록` 탭: 이벤트 로그, 세션 묶음, 전체 펼침/접기
 - 하단: 결정 액션 바
 
-우측 탭은 `rt=timeline` query로 상태가 유지됩니다.
+우측 탭은 `rt=timeline` query로 상태가 유지됩니다. 현재 우측 패널은 sticky 고정보다 가시성 우선 원칙으로 동작하며, 관계/의존성/탭/콘텐츠가 위에서 아래로 모두 노출되는 레이아웃을 사용합니다.
 
 ### 리치 편집기/블록 편집
 

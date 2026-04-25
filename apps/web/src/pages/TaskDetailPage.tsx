@@ -355,12 +355,96 @@ function TaskRightPanel({
           { value: "timeline", label: "변경 기록", count: timeline.length }
         ]}
       />
-      {tab === "thread" ? (
-        <ThreadPanel taskId={taskId} notes={notes} tasks={tasks} comments={comments} members={members} me={me} onReload={onReload} />
-      ) : (
-        <TimelinePanel timeline={timeline} notes={notes} members={members} />
-      )}
+      <div className="task-right-content">
+        {tab === "thread" ? (
+          <ThreadPanel taskId={taskId} notes={notes} tasks={tasks} comments={comments} members={members} me={me} onReload={onReload} />
+        ) : (
+          <TimelinePanel timeline={timeline} notes={notes} members={members} />
+        )}
+      </div>
     </aside>
+  );
+}
+
+function TaskDependencyImpactPanel({ task, referenceableTasks }: { task: TaskView; referenceableTasks: TaskView[] }) {
+  const graph = useMemo(() => {
+    const byId = new Map(referenceableTasks.map((row) => [row.id, row]));
+    const parent = task.parentId ? byId.get(task.parentId) ?? null : null;
+    const children = referenceableTasks.filter((row) => row.parentId === task.id);
+
+    const ancestors: TaskView[] = [];
+    const visited = new Set<string>([task.id]);
+    let cursor = parent;
+    while (cursor && !visited.has(cursor.id)) {
+      ancestors.push(cursor);
+      visited.add(cursor.id);
+      cursor = cursor.parentId ? byId.get(cursor.parentId) ?? null : null;
+    }
+
+    const descendants: TaskView[] = [];
+    const queue = [...children];
+    const seen = new Set<string>(queue.map((row) => row.id));
+    while (queue.length) {
+      const node = queue.shift()!;
+      descendants.push(node);
+      const next = referenceableTasks.filter((row) => row.parentId === node.id);
+      next.forEach((row) => {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          queue.push(row);
+        }
+      });
+    }
+    return { parent, children, ancestors, descendants };
+  }, [referenceableTasks, task.id, task.parentId]);
+
+  const impactTone = graph.descendants.length >= 8 ? "high" : graph.descendants.length >= 3 ? "medium" : "low";
+  const impactLabel = impactTone === "high" ? "HIGH" : impactTone === "medium" ? "MEDIUM" : "LOW";
+  return (
+    <div className="task-dependency-panel">
+      <div className="task-context-head task-dependency-head">
+        <strong>의존성/영향 범위</strong>
+        <small>Risk {impactLabel}</small>
+      </div>
+      <p className="task-dependency-caption">Depends on (선행) / Blocks & Affects (후행 영향)</p>
+      <div className="task-dependency-metrics">
+        <span><i>⛓</i>Depends on {graph.parent ? "1" : "0"}</span>
+        <span><i>⛔</i>Blocks {graph.children.length}</span>
+        <span><i>↘</i>Affected {graph.descendants.length}</span>
+      </div>
+      <div className="task-dependency-group">
+        <h5><i>⛓</i>Depends on (Upstream)</h5>
+        {graph.parent ? (
+          <button className="task-dependency-item" onClick={() => go(`/tasks/${graph.parent!.id}`)} title={graph.parent.title}>
+            <b>{graph.parent.title}</b>
+            <small>이 태스크가 선행 완료를 기다리는 항목</small>
+          </button>
+        ) : (
+          <p className="muted">선행 의존성이 없습니다 (No upstream dependency).</p>
+        )}
+        {graph.ancestors.length > 1 && (
+          <p className="muted">Upstream chain: {graph.ancestors.length} steps</p>
+        )}
+      </div>
+      <div className="task-dependency-group">
+        <h5><i>↘</i>Blocks / Affected (Downstream)</h5>
+        {graph.children.length ? (
+          <div className="task-dependency-list">
+            {graph.children.slice(0, 6).map((child) => (
+              <button key={child.id} className="task-dependency-item" onClick={() => go(`/tasks/${child.id}`)} title={child.title}>
+                <b>{child.title}</b>
+                <small>이 태스크 완료가 필요한 직접 후행 항목</small>
+              </button>
+            ))}
+            {graph.children.length > 6 && (
+              <p className="muted">+{graph.children.length - 6} more downstream tasks</p>
+            )}
+          </div>
+        ) : (
+          <p className="muted">직접 후행 영향 항목이 없습니다 (No downstream impact).</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -369,15 +453,15 @@ function TaskContextMiniMap({ task, referenceableTasks }: { task: TaskView; refe
   const children = referenceableTasks.filter((row) => row.parentId === task.id);
   const childPreview = children;
   const mapInnerWidth = 320;
-  const mapPad = 14;
+  const mapPad = 12;
   const nodeTitleFontSize = childPreview.length >= 6 ? 10 : childPreview.length >= 3 ? 11 : 12;
-  const parentNode = { x: mapPad, y: 14, w: 112, h: 40 };
-  const currentNode = { x: Math.round((mapInnerWidth - 136) / 2), y: 86, w: 136, h: 48 };
+  const parentNode = { x: mapPad, y: 12, w: 112, h: 38 };
+  const currentNode = { x: Math.round((mapInnerWidth - 136) / 2), y: 78, w: 136, h: 46 };
   const childNodeWidth = 92;
   const childNodeHeight = 40;
   const childX = mapInnerWidth - childNodeWidth - mapPad;
-  const childGapY = 44;
-  const childStartY = currentNode.y + 18;
+  const childGapY = 42;
+  const childStartY = currentNode.y + 16;
   const childPositions = childPreview.map((_, index) => ({ x: childX, y: childStartY + index * childGapY, w: childNodeWidth, h: childNodeHeight }));
   const leafNode = { x: childX, y: currentNode.y + 22, w: childNodeWidth, h: childNodeHeight };
   const visibleRects = [
@@ -394,9 +478,9 @@ function TaskContextMiniMap({ task, referenceableTasks }: { task: TaskView; refe
     }),
     { minX: Number.POSITIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxX: 0, maxY: 0 }
   );
-  const padding = 16;
+  const padding = 12;
   const viewBox = `${bounds.minX - padding} ${bounds.minY - padding} ${bounds.maxX - bounds.minX + padding * 2} ${bounds.maxY - bounds.minY + padding * 2}`;
-  const mapPixelHeight = Math.max(166, bounds.maxY - bounds.minY + padding * 2);
+  const mapPixelHeight = Math.max(152, bounds.maxY - bounds.minY + padding * 2);
   const parentHasEdge = Boolean(parent);
   const childHasEdge = childPreview.length > 0;
   return (
@@ -464,6 +548,7 @@ function TaskContextMiniMap({ task, referenceableTasks }: { task: TaskView; refe
         <span>head {parent ? "1" : "0"}</span>
         <span>tail {children.length}</span>
       </div>
+      <TaskDependencyImpactPanel task={task} referenceableTasks={referenceableTasks} />
     </section>
   );
 }
