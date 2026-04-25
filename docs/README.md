@@ -7,6 +7,8 @@
 ```text
 docs/
   README.md
+  OKR_MVP1_MVP2.md
+  OKR_MATCHING_REPORT.md
   ARCHITECTURE.md
   FRONTEND.md
   BACKEND.md
@@ -63,6 +65,8 @@ docs/
 
 ## 비즈니스 룰 문서
 
+- `OKR_MVP1_MVP2.md`: Objective 1/2, KR, Hook 루프 기준을 정리한 OKR 원문
+- `OKR_MATCHING_REPORT.md`: OKR 대비 현재 시스템 구현 매칭 결과(달성/부분달성/미달성)
 - `business-rules/BUSINESS_RULES.md`: 제품에서 반드시 지켜야 하는 운영 기준과 서버 검증 원칙
 - `business-rules/DOMAIN_GLOSSARY.md`: Unit, Work Graph, Template, Inbox, Decision Graph 등 핵심 도메인 용어 정의
 - `business-rules/SYSTEM_SPEC.md`: 비즈니스 룰을 시스템 요구사항과 영향 영역으로 매핑
