@@ -87,6 +87,7 @@
 - 레거시 파일 필드(`__task_files`, `FILE` type)는 Form Output/Template 저장 시 제거되어야 하며 재유입되면 안 됩니다.
 - 자유폼 Form Output 편집은 블록 단위 추가/편집 흐름을 지원해야 합니다.
 - parent 변경은 Work Graph cycle을 만들 수 없습니다.
+- 템플릿 적용 시 Task는 생성/적용 시점의 Template/Form/Workflow/Approval Policy snapshot을 고정해야 합니다. 현재 구현은 embedded snapshot이고, 운영 DB 전환 시 immutable VersionRef로 확장합니다.
 - 템플릿 센터는 lifecycle 필터/검색/정렬/페이지네이션을 지원해야 합니다.
 - 태스크 상세 템플릿 셀렉터는 `DEPRECATED/ARCHIVED`를 기본 숨김하되 현재 연결 템플릿은 예외적으로 노출해야 합니다.
 
@@ -120,13 +121,15 @@
 
 - 전이 요청은 `reason`을 필수로 받습니다.
 - `TaskState`는 `DRAFT`, `IN_PROGRESS`, `DONE`, `CANCELED`입니다.
-- 승인 대기 등 세부 단계는 `WorkflowStatusCategory`로 표현합니다.
+- 승인 대기 등 세부 단계의 매핑 분류는 `WorkflowStatusCategory`로 표현합니다.
+- 실제 승인 대기 런타임은 열린 `ApprovalRequest(status=PENDING)` 존재 여부로 판단하며, 프론트는 `workflowStatusId` 문자열을 추측하지 않습니다.
 - 템플릿 전이 조건의 `approvalGate`가 활성화된 경우, 정책 선택은 `approvalGate.policyId`를 우선하고 없으면 task의 `approvalPolicyId`를 사용합니다.
 - 선택된 정책의 `mode`/`approvalLines`/`finalApproverId`에 따라 결재 유형과 결재 라인을 해석해야 합니다.
 - `mode=CONSENSUS`에서는 UI의 `APPROVE` 라벨을 `합의`로 표시하되, API 전송값은 `decisionType=APPROVE`를 유지합니다.
 - 승인 요청은 `ApprovalRequest`, 승인/반려/보완 판단은 `ApprovalDecision`으로 기록합니다.
 - 열린 승인 요청이 있는 task에는 추가 승인 요청을 만들 수 없으며 `APPROVAL_ALREADY_PENDING`을 반환합니다.
 - 전이 결과는 타임라인 이벤트와 Inbox 항목을 생성합니다.
+- 상세 응답은 `TaskDetailDto`의 `workflowRuntime`, `activeApprovalRequest`, `availableActions`, `permissions`, `timeline`을 포함해야 합니다.
 
 영향 영역:
 

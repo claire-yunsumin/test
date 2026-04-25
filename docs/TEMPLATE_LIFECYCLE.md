@@ -35,7 +35,8 @@ Template 핵심 필드:
 2. 태스크의 `templateId`, `templateType`, `structureState`를 갱신합니다.
 3. `structureState=TEMPLATED`로 전환합니다.
 4. `formValues`는 기존 값을 보존하고 `formDefinition` 배열의 field key 누락분을 보강합니다.
-5. `TEMPLATE_APPLIED` engagement event를 생성합니다.
+5. `templateSnapshot`, `formSnapshot`, `workflowSnapshot`, `approvalPolicySnapshot`을 적용 시점 기준으로 고정합니다.
+6. `TEMPLATE_APPLIED` engagement event와 `TEMPLATE_SNAPSHOT_APPLIED` 타임라인 이벤트를 생성합니다.
 
 ## 3. Form Output 저장
 
@@ -85,7 +86,7 @@ flowchart LR
 ## 읽을 코드
 
 - `packages/shared/src/index.ts`: `Template`, `FormFieldDefinition`, `WorkflowStatusDefinition`
-- `apps/api/src/server.ts`: template CRUD, task template 적용, transition 처리
+- `apps/api/src/server.ts`: template CRUD, task template 적용, transition/approval 처리
 - `apps/api/src/domain/store.ts`: engagement와 task 직렬화
 - `apps/web/src/pages/settings/SettingsPages.tsx`: Template 관리
 - `apps/web/src/pages/TaskDetailPage.tsx`: Form Output, 결정 액션 UI

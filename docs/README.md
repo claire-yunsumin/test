@@ -101,6 +101,8 @@ docs/
 - 좌측 `Shell`의 Explorer는 Unit·Folder·List를 트리로 보여 주며(팀/채널 UI는 **IA 참고**), List 행에 채널의 `#` 표기는 쓰지 않습니다(스레드의 `#` 노트 커맨드와 구분).
 - Work Graph는 `FREEFORM` 형상화와 `TEMPLATED` 정형화를 구분합니다.
 - Template은 `formDefinition`, `inspectionCriteria`, `workflow`, `workflowSchema`를 가집니다.
+- Task는 Template 적용 시점의 `templateSnapshot`, `formSnapshot`, `workflowSnapshot`, `approvalPolicySnapshot`을 고정합니다.
+- 승인 대기는 `workflowStatusId` 문자열 추측이 아니라 `ApprovalRequest` 존재 여부와 서버가 내려주는 `TaskDetailDto` 런타임 필드로 판단합니다.
 - 스레드는 입력 중 `@` 또는 `#` 커맨드 검색으로 멘션/노트 참조를 선택합니다.
 - 태스크 상세 우측 영역은 `논의`와 `변경 기록` 탭으로 전환됩니다.
 - 태스크 상세 우측 상단에는 현재 태스크 기준 1-depth `관계/구조 맥락` 미니맵이 표시되며, 상/하위 노드를 클릭해 이동할 수 있습니다.

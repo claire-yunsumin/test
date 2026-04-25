@@ -56,7 +56,7 @@
 
 | 영역 | 검증 항목 |
 | --- | --- |
-| API | Inbox 컴포넌트 매핑, ack/read/remind/read-all, transition 이벤트 타입 |
+| API | Inbox 컴포넌트 매핑, ack/read/remind/read-all, split transition/approval APIs, 승인 요청 중복 409, TaskDetailDto 런타임 필드 |
 | UI | Inbox 4분류 처리행동, Task 승인단계 가시성, Analytics O1 판정 카드 |
 | 판정 | O1 `Unmet Needs/Retention` Yes/No가 이벤트 로그 변화에 따라 재현 가능한지 확인 |
 

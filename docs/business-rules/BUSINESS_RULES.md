@@ -172,9 +172,9 @@ CRUD 운영 규칙:
 - `DONE`
 - `CANCELED`
 
-세부 워크플로우는 `WorkflowStatus`와 `WorkflowStatusCategory`로 표현합니다. 승인 대기 같은 단계는 `TaskState`가 아니라 워크플로우 상태 카테고리(`PENDING_APPROVAL`)로 관리합니다.
+세부 워크플로우는 `WorkflowStatus`와 `WorkflowStatusCategory`로 표현합니다. `PENDING_APPROVAL` 카테고리는 템플릿 상태 매핑을 위한 분류이고, 실제 승인 대기 런타임은 열린 `ApprovalRequest(status=PENDING)` 존재 여부로 판단합니다.
 
-전이 API는 `reason`을 필수로 받습니다. 결정 타입은 `APPROVE`, `REJECT`, `SUPPLEMENT`, `STATE_ONLY`를 사용하며, 결과는 타임라인과 Inbox에 기록됩니다.
+전이 API는 `reason`을 필수로 받습니다. 승인 없는 일반 상태 전이는 `/api/tasks/:taskId/transitions`, 승인 요청은 `/api/tasks/:taskId/approval-requests`, 승인/반려/보완 판단은 `/api/approval-requests/:approvalRequestId/decisions`로 분리합니다. 결정 타입은 `APPROVE`, `REJECT`, `SUPPLEMENT`, `STATE_ONLY`를 사용하며, 결과는 타임라인과 Inbox에 기록됩니다.
 
 ## 8. 승인 정책
 
@@ -186,6 +186,8 @@ CRUD 운영 규칙:
 - 비활성 정책은 새 결정 흐름에 적용하지 않습니다.
 
 승인 정책은 결정 UX를 구조화하기 위한 운영 규칙이며, 단순 상태 변경과 구분해야 합니다.
+
+승인 요청은 `ApprovalRequest`, 승인/반려/보완 판단은 `ApprovalDecision`으로 기록합니다. 하나의 task에 열린 승인 요청이 있으면 새 승인 요청은 `409 APPROVAL_ALREADY_PENDING`으로 거절합니다.
 
 ## 9. Inbox와 알림
 

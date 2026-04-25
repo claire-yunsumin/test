@@ -14,16 +14,16 @@ Inbox는 주로 서버 이벤트 처리 중 생성됩니다.
 - 완료/취소 결과
 - 구조 변경 또는 상태 가시성 변화
 
-저장 함수는 `addInbox()`입니다.
+현재 인메모리 구현의 저장 함수는 `addInbox()`입니다. 운영 DB 전환 목표에서는 도메인 트랜잭션 안에서 Inbox/outbox record만 적재하고, 외부 push/email/analytics projection은 commit 이후 worker가 처리합니다.
 
 ## 분류
 
 `componentForEvent()` 기본 분류:
 
-- `DECISION`: `APPROVAL_REQUESTED`, `APPROVAL_APPROVED`, `APPROVAL_REJECTED`
-- `DISCUSSION`: `COMMENT`, `MENTION`, `NOTE_UPDATED`
+- `DECISION`: `APPROVAL_REQUESTED`, `APPROVAL_APPROVED`, `APPROVAL_REJECTED`, `APPROVAL_SUPPLEMENT_REQUESTED`
+- `DISCUSSION`: `COMMENT`, `MENTION`, `NOTE_UPDATED`, `NOTE_REFERENCED`
 - `RESULT`: `COMPLETED`, `CANCELED`
-- `AWARENESS`: 그 외 상태/구조 인지 이벤트
+- `AWARENESS`: `TASK_CREATED`, `STATE_TRANSITION`, `TASK_TRANSITIONED`, `HIERARCHY_CHANGE`, `TEMPLATE_APPLIED`, `TEMPLATE_REPLACED`, `TEMPLATE_REMOVED`, `TEMPLATE_SNAPSHOT_APPLIED` 등 상태/구조 인지 이벤트
 
 ## 수신자 계산
 

@@ -74,13 +74,13 @@
 동작:
 
 1. 정책이 enabled인지 확인합니다.
-2. 요청자 또는 전이 승인자가 해당 policy의 승인자 집합에 포함되는지 확인합니다.
-3. task의 `approvalPolicyId`와 `approvalPolicySnapshot`을 갱신합니다.
-4. `ApprovalRequest.policySnapshot`에 요청 시점 정책을 고정합니다.
+2. 승인 요청 생성 시 task의 `approvalPolicyId`와 `approvalPolicySnapshot`을 갱신합니다.
+3. `ApprovalRequest.policySnapshot`에 요청 시점 정책을 고정합니다.
+4. 승인 판단 시 전이 승인자가 해당 policy의 승인자 집합에 포함되는지 확인합니다.
 5. Timeline payload에 request/decision id와 snapshot 참조를 남깁니다.
 6. 승인 요청 성격의 전이에서는 policy 기반 수신자에게 Inbox를 생성합니다.
 
-현재 전이 API는 policy의 `unitId`와 task의 `unitId` 일치 여부를 별도로 검증하지 않습니다. Unit 기본 승인정책 설정 시에는 policy scope를 검증합니다.
+현재 승인 요청/판단 API는 policy의 `unitId`와 task의 `unitId` 일치 여부를 별도로 검증하지 않습니다. Unit 기본 승인정책 설정 시에는 policy scope를 검증합니다.
 
 ## 승인자 계산 우선순위
 

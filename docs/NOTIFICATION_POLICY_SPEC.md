@@ -82,9 +82,9 @@ Inbox 처리:
 
 ## 컴포넌트별 운영 의미
 
-- `DECISION`: 승인 요청, 반려, 보완 같은 의사결정 대기 신호
-- `DISCUSSION`: 댓글, 멘션, 노트 수정처럼 논의가 필요한 신호
-- `AWARENESS`: 구조 변경, 상태 변화처럼 인지가 필요한 신호
+- `DECISION`: `APPROVAL_REQUESTED`, `APPROVAL_APPROVED`, `APPROVAL_REJECTED`, `APPROVAL_SUPPLEMENT_REQUESTED`
+- `DISCUSSION`: `COMMENT`, `MENTION`, `NOTE_UPDATED`, `NOTE_REFERENCED`
+- `AWARENESS`: `TASK_CREATED`, `STATE_TRANSITION`, `TASK_TRANSITIONED`, `HIERARCHY_CHANGE`, `TEMPLATE_APPLIED`, `TEMPLATE_REPLACED`, `TEMPLATE_REMOVED`, `TEMPLATE_SNAPSHOT_APPLIED`
 - `RESULT`: 완료, 취소처럼 결과 확인이 필요한 신호
 
 `mutedComponents`는 사용자가 알림 채널에서 줄이고 싶은 컴포넌트 유형을 저장합니다. 데이터 자체를 숨기는 권한 규칙은 아니며, Inbox 가시성은 인증/권한/가시성 정책을 따릅니다.
@@ -102,6 +102,7 @@ Inbox 처리:
 - 실제 외부 push 발송 worker는 없습니다.
 - 이메일 발송과 digest 발송은 설정 저장까지만 표현합니다.
 - `mentionOnlyForWatchers`는 정책 필드로 존재하지만, 모든 알림 라우팅에 세밀하게 적용되는 별도 worker는 아직 없습니다.
+- 운영 DB 전환 목표에서는 도메인 트랜잭션 안에서 outbox record만 저장하고, 외부 push/email/digest 발송은 commit 이후 worker가 처리합니다.
 
 ## 읽을 코드
 

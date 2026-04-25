@@ -15,7 +15,7 @@
 | --- | --- | --- | --- | --- | --- |
 | A | 알람 분류 (Trigger) | Inbox 4분류(DECISION/DISCUSSION/AWARENESS/RESULT), read/ack/remind/read-all | 이벤트 발생(전이/멘션/완료/변경) | 사용자 기대행동 기준 큐 분배 | Inbox API/UI, Home Queue |
 | B | Notes 기반 논의 (Action) | Notes(파일/Rich Text) 귀속, Thread에서 `#노트` 참조, 멘션/참조 검증 | 논의 참여자가 Notes 참조하며 댓글/멘션 작성 | 논의 맥락이 Task 인스턴스에 보존 | Task Detail Discussion, Note/Comment API |
-| C | 합의/승인 Gate (Action) | 전이 reason 필수, 승인 정책 기반 승인자 검증, 승인/반려/보완요청 처리 | 검토대기 상태에서 승인 판단 | 결정 결과가 상태전이와 함께 귀속 | Transition API, Approval Policy |
+| C | 합의/승인 Gate (Action) | 전이 reason 필수, ApprovalRequest/ApprovalDecision 분리, 승인 정책 기반 승인자 검증, 승인/반려/보완요청 처리 | 승인 요청 생성 또는 검토대기 상태에서 승인 판단 | 결정 결과가 상태전이와 함께 귀속 | Transition/Approval APIs, Approval Policy |
 | D | 결정 추적 (증거화) | Timeline 이벤트 기록(누가/언제/왜/근거) | 전이/결정 액션 발생 | 사후 추적 가능한 결정 이력 | Timeline API/UI |
 
 ## 알람 4분류 운영 스펙
@@ -31,7 +31,7 @@
 
 | 단계 | 상태/행동 | 필수 검증 | 기록 항목 |
 | --- | --- | --- | --- |
-| 1 | 승인요청 | 대상 Workflow 전이 유효성, reason 존재 | 요청자, 시각, 사유 |
+| 1 | 승인요청 | 대상 Workflow 전이 유효성, reason 존재, 열린 ApprovalRequest 중복 없음 | 요청자, 시각, 사유, policySnapshot |
 | 2 | 검토 | 정책 승인자/역할 검증 | 검토자, 참조 Notes |
 | 3 | 결정 | 승인/반려/보완요청 중 1개 선택 | 결정 타입, 사유 |
 | 4 | 귀속 | 상태전이 반영 + Inbox 라우팅 | 전이 전/후 상태, 수신자 |

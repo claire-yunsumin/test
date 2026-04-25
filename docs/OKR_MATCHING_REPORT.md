@@ -19,7 +19,7 @@
 | KR 1.1-멘션 | 노드/필드/노트 멘션으로 논의 시작 | `@`/`#` composer, MEMBER/TASK/FORM_FIELD/NOTE 검증, INVALID_MENTION 처리 | 달성 |
 | KR 1.2-알람 분류 | 결정/논의/인지/결과 흐름 기반 처리 | 이벤트-컴포넌트 명시 매핑 보강, Inbox read/ack/remind/read-all 액션이 API/UI에서 모두 노출 | 달성 |
 | KR 1.2-Notes 귀속 | Notes/Thread가 결정 대상에 귀속 | 노트 CRUD + 태그 + 참조 링크 + 스레드 결합 구조 정의 | 달성 |
-| KR 1.2-합의/승인 Gate | 승인/반려/보완요청과 결정 추적 | 전이 이벤트가 APPROVAL_REQUESTED/APPROVAL_APPROVED/APPROVAL_REJECTED로 세분화되고, Task 상세에서 승인 단계/근거 가시화 | 달성 |
+| KR 1.2-합의/승인 Gate | 승인/반려/보완요청과 결정 추적 | ApprovalRequest/ApprovalDecision이 분리되고, 전이 이벤트가 APPROVAL_REQUESTED/APPROVAL_APPROVED/APPROVAL_REJECTED/APPROVAL_SUPPLEMENT_REQUESTED로 세분화되며, Task 상세에서 승인 단계/근거 가시화 | 달성 |
 | O1 Retention 측정 | 자발적 재방문/루프 반복 판단 | `Alarm->Action 전환율`, `결정 귀속 완결률`, `주간 자발 재방문율(7d)`를 API 계산 및 Analytics 화면 자동 판정에 반영 | 달성 |
 
 ## Objective 2 매칭 (AI 활용 + 변경 인지)
