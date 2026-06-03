@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate app icons (solid gradient background + white checkmark) as PNGs.
+"""Generate app icons (black-leather diary cover + white ink checkmark) as PNGs.
 
 Pure stdlib (zlib + struct) PNG encoder so it runs without Pillow/ImageMagick.
 """
@@ -10,10 +10,11 @@ import zlib
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "icons")
 
-# Gradient endpoints (indigo -> violet)
-TOP = (99, 102, 241)
-BOTTOM = (139, 92, 246)
-WHITE = (255, 255, 255)
+# Black-leather cover: subtle top-to-bottom gradient + white ink + faint frame.
+TOP = (28, 28, 30)
+BOTTOM = (8, 8, 9)
+INK = (245, 245, 243)
+FRAME = (90, 90, 92)
 
 
 def lerp(a, b, t):
@@ -39,20 +40,36 @@ def make_png(size):
     p2 = (s * 0.44, s * 0.70)
     p3 = (s * 0.72, s * 0.34)
 
+    # Notebook-cover frame inset from the edges.
+    margin = s * 0.12
+    fw = max(1.0, s * 0.012)  # frame line width
+
     raw = bytearray()
     for y in range(s):
         raw.append(0)  # filter type 0 for each scanline
         bg = lerp(TOP, BOTTOM, y / (s - 1))
         for x in range(s):
+            # base leather background
+            r, g, b = bg
+
+            # faint frame: distance to the inset rectangle outline
+            inside = margin <= x <= s - margin and margin <= y <= s - margin
+            if inside:
+                edge = min(x - margin, s - margin - x, y - margin, s - margin - y)
+                fcov = max(0.0, min(1.0, (fw - edge) / 1.0 + 0.5)) * 0.6
+                r = round(r + (FRAME[0] - r) * fcov)
+                g = round(g + (FRAME[1] - g) * fcov)
+                b = round(b + (FRAME[2] - b) * fcov)
+
+            # white ink checkmark on top
             d = min(
                 dist_to_segment(x, y, *p1, *p2),
                 dist_to_segment(x, y, *p2, *p3),
             )
-            # smooth edge coverage over ~1.5px
             cov = max(0.0, min(1.0, (thickness - d) / 1.5 + 0.5))
-            r = round(bg[0] + (WHITE[0] - bg[0]) * cov)
-            g = round(bg[1] + (WHITE[1] - bg[1]) * cov)
-            b = round(bg[2] + (WHITE[2] - bg[2]) * cov)
+            r = round(r + (INK[0] - r) * cov)
+            g = round(g + (INK[1] - g) * cov)
+            b = round(b + (INK[2] - b) * cov)
             raw += bytes((r, g, b, 255))
 
     def chunk(tag, data):
