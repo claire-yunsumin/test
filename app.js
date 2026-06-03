@@ -256,7 +256,7 @@ function renderStats() {
         <div class="bar-emoji">${h.emoji}</div>
         <div class="bar-main">
           <div class="bar-name"><span>${escapeHtml(h.name)}</span><span class="muted">${r.pct}%</span></div>
-          <div class="bar-track"><div class="bar-fill" style="width:${r.pct}%;background:${h.color}"></div></div>
+          <div class="bar-track"><div class="bar-fill" style="width:${r.pct}%"></div></div>
         </div>
       </div>`;
   }
@@ -343,9 +343,9 @@ function openDaySheet(key) {
   const label = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_NAMES[d.getDay()]})`;
   const rows = habits.map((h) => `
     <button class="day-row" data-id="${h.id}">
-      <span class="day-row-emoji" style="background:${h.color}">${h.emoji}</span>
+      <span class="day-row-emoji">${h.emoji}</span>
       <span class="day-row-name">${escapeHtml(h.name)}</span>
-      <span class="check ${h.history[key] ? "done" : ""}" style="--habit-color:${h.color}">✓</span>
+      <span class="check ${h.history[key] ? "done" : ""}">✓</span>
     </button>`).join("");
   daySheet.innerHTML = `
     <div class="sheet">
@@ -670,7 +670,7 @@ function applyTheme(theme) {
   // show the icon for the action (what tapping will switch to)
   themeBtn.textContent = theme === "light" ? "🌙" : "☀️";
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#f3f4fb" : "#0f1020";
+  if (meta) meta.content = theme === "light" ? "#ece5d4" : "#17150f";
 }
 
 let theme = localStorage.getItem(THEME_KEY) || document.documentElement.dataset.theme || "dark";
