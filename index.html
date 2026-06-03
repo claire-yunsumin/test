@@ -24,7 +24,7 @@
   <div id="app">
     <header class="topbar">
       <div>
-        <h1>오늘의 습관</h1>
+        <h1 id="screenTitle">오늘의 습관</h1>
         <p id="todayLabel" class="muted"></p>
       </div>
       <div class="progress-ring" id="progressRing" aria-hidden="true">
@@ -32,14 +32,29 @@
       </div>
     </header>
 
-    <main id="list" class="list"></main>
+    <!-- tabs -->
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="today">오늘</button>
+      <button class="tab" data-tab="stats">통계</button>
+    </nav>
 
-    <p id="empty" class="empty" hidden>
-      아직 습관이 없어요.<br />아래 <b>+ 버튼</b>으로 첫 습관을 추가해 보세요.
-    </p>
+    <!-- today -->
+    <main id="todayView">
+      <div id="list" class="list"></div>
+      <p id="empty" class="empty" hidden>
+        아직 습관이 없어요.<br />아래 <b>+ 버튼</b>으로 첫 습관을 추가해 보세요.
+      </p>
+      <p id="reorderHint" class="hint" hidden>습관을 탭해서 들어가면 ▲▼ 버튼으로 순서를 바꿀 수 있어요.</p>
+    </main>
+
+    <!-- stats -->
+    <main id="statsView" hidden></main>
 
     <button id="addBtn" class="fab" aria-label="습관 추가">+</button>
   </div>
+
+  <!-- Habit detail (full screen) -->
+  <div id="detail" class="detail" hidden></div>
 
   <!-- Add / edit sheet -->
   <div id="sheet" class="sheet-backdrop" hidden>
@@ -61,7 +76,6 @@
         <button id="cancelBtn" class="btn ghost">취소</button>
         <button id="saveBtn" class="btn primary">저장</button>
       </div>
-      <button id="deleteBtn" class="btn danger" hidden>이 습관 삭제</button>
     </div>
   </div>
 
