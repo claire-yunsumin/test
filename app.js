@@ -101,11 +101,12 @@ const todayLabel = document.getElementById("todayLabel");
 const progressRing = document.getElementById("progressRing");
 const progressText = document.getElementById("progressText");
 const screenTitle = document.getElementById("screenTitle");
+const calendarView = document.getElementById("calendarView");
 const todayView = document.getElementById("todayView");
 const statsView = document.getElementById("statsView");
 const tabs = document.getElementById("tabs");
 
-let activeTab = "today";
+let activeTab = "calendar";
 
 // ---- top bar ----
 function renderTopbar() {
@@ -266,14 +267,118 @@ function escapeHtml(s) {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
+// ---- home calendar (month overview) ----
+let homeY, homeM;
+
+function dayCount(key) {
+  return habits.reduce((n, h) => n + (h.history[key] ? 1 : 0), 0);
+}
+
+function renderCalendarView() {
+  const t = today();
+  if (homeY === undefined) { homeY = t.getFullYear(); homeM = t.getMonth(); }
+  if (!habits.length) {
+    calendarView.innerHTML = `<p class="empty">습관을 추가하면 달력에 한 달 현황이 표시돼요.</p>`;
+    return;
+  }
+  const total = habits.length;
+  const daysInMonth = new Date(homeY, homeM + 1, 0).getDate();
+  const first = new Date(homeY, homeM, 1).getDay();
+  const nextDisabled = homeY === t.getFullYear() && homeM === t.getMonth();
+
+  let perfect = 0, active = 0;
+  let cells = "";
+  for (let i = 0; i < first; i++) cells += `<div class="cal-cell blank"></div>`;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(homeY, homeM, day);
+    const key = dateKey(d);
+    const done = dayCount(key);
+    const ratio = total ? done / total : 0;
+    const isFuture = d > t;
+    const isToday = key === TODAY_KEY;
+    let lvl = 0;
+    if (done > 0) lvl = ratio >= 1 ? 4 : ratio >= 0.67 ? 3 : ratio >= 0.34 ? 2 : 1;
+    if (!isFuture && done > 0) active++;
+    if (!isFuture && ratio >= 1) perfect++;
+    cells += `<button class="cal-cell heat-${lvl}${isToday ? " today" : ""}${isFuture ? " future" : ""}" data-key="${key}" ${isFuture ? "disabled" : ""}>${day}</button>`;
+  }
+
+  calendarView.innerHTML = `
+    <div class="cal-nav">
+      <button id="h_prev" aria-label="이전 달">‹</button>
+      <span class="cal-month">${homeY}년 ${homeM + 1}월</span>
+      <button id="h_next" aria-label="다음 달" ${nextDisabled ? "disabled" : ""}>›</button>
+    </div>
+    <div class="cal-grid">
+      ${DAY_NAMES.map((d) => `<div class="cal-head">${d}</div>`).join("")}
+      ${cells}
+    </div>
+    <div class="cal-summary">
+      <div class="chip"><b>${perfect}</b>일 완벽 달성</div>
+      <div class="chip"><b>${active}</b>일 활동</div>
+      <div class="chip">습관 <b>${total}</b>개</div>
+    </div>
+    <p class="hint">날짜를 탭하면 그날의 습관을 체크할 수 있어요.</p>
+  `;
+
+  calendarView.querySelector("#h_prev").onclick = () => {
+    homeM--; if (homeM < 0) { homeM = 11; homeY--; }
+    renderCalendarView();
+  };
+  calendarView.querySelector("#h_next").onclick = () => {
+    if (nextDisabled) return;
+    homeM++; if (homeM > 11) { homeM = 0; homeY++; }
+    renderCalendarView();
+  };
+  calendarView.querySelectorAll(".cal-cell[data-key]").forEach((c) => {
+    if (!c.disabled) c.onclick = () => openDaySheet(c.dataset.key);
+  });
+}
+
+// ---- day sheet (tap a calendar day) ----
+const daySheet = document.getElementById("daySheet");
+
+function openDaySheet(key) {
+  const d = new Date(key + "T00:00:00");
+  const label = `${d.getMonth() + 1}월 ${d.getDate()}일 (${DAY_NAMES[d.getDay()]})`;
+  const rows = habits.map((h) => `
+    <button class="day-row" data-id="${h.id}">
+      <span class="day-row-emoji" style="background:${h.color}">${h.emoji}</span>
+      <span class="day-row-name">${escapeHtml(h.name)}</span>
+      <span class="check ${h.history[key] ? "done" : ""}" style="--habit-color:${h.color}">✓</span>
+    </button>`).join("");
+  daySheet.innerHTML = `
+    <div class="sheet">
+      <h2>${label}</h2>
+      <div class="day-list">${rows}</div>
+      <div class="sheet-actions"><button class="btn primary" id="ds_close">닫기</button></div>
+    </div>`;
+  daySheet.hidden = false;
+  daySheet.querySelector("#ds_close").onclick = closeDaySheet;
+  daySheet.querySelectorAll(".day-row").forEach((r) => {
+    r.onclick = () => {
+      const h = habits.find((x) => x.id === r.dataset.id);
+      if (!h) return;
+      if (h.history[key]) delete h.history[key];
+      else { h.history[key] = true; if (navigator.vibrate) navigator.vibrate(10); }
+      save();
+      r.querySelector(".check").classList.toggle("done", !!h.history[key]);
+      renderCalendarView();
+      renderTopbar();
+    };
+  });
+}
+function closeDaySheet() { daySheet.hidden = true; }
+daySheet.addEventListener("click", (e) => { if (e.target === daySheet) closeDaySheet(); });
+
 // ---- tabs ----
 function setTab(tab) {
   activeTab = tab;
   [...tabs.children].forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
-  const isToday = tab === "today";
-  todayView.hidden = !isToday;
-  statsView.hidden = isToday;
-  screenTitle.textContent = isToday ? "오늘의 습관" : "통계";
+  calendarView.hidden = tab !== "calendar";
+  todayView.hidden = tab !== "today";
+  statsView.hidden = tab !== "stats";
+  screenTitle.textContent = tab === "calendar" ? "한 달 현황" : tab === "today" ? "오늘의 습관" : "통계";
   rerender();
 }
 tabs.addEventListener("click", (e) => {
@@ -283,7 +388,8 @@ tabs.addEventListener("click", (e) => {
 
 function rerender() {
   renderTopbar();
-  if (activeTab === "today") renderToday();
+  if (activeTab === "calendar") renderCalendarView();
+  else if (activeTab === "today") renderToday();
   else renderStats();
 }
 
@@ -577,7 +683,7 @@ themeBtn.addEventListener("click", () => {
 
 // ---- init ----
 buildPickers();
-setTab("today");
+setTab("calendar");
 checkReminders();
 setInterval(checkReminders, 30000);
 

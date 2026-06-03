@@ -47,12 +47,16 @@
 
     <!-- tabs -->
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-tab="today">오늘</button>
+      <button class="tab active" data-tab="calendar">캘린더</button>
+      <button class="tab" data-tab="today">오늘</button>
       <button class="tab" data-tab="stats">통계</button>
     </nav>
 
+    <!-- calendar (home) -->
+    <main id="calendarView"></main>
+
     <!-- today -->
-    <main id="todayView">
+    <main id="todayView" hidden>
       <div id="list" class="list"></div>
       <p id="empty" class="empty" hidden>
         아직 습관이 없어요.<br />아래 <b>+ 버튼</b>으로 첫 습관을 추가해 보세요.
@@ -65,6 +69,9 @@
 
     <button id="addBtn" class="fab" aria-label="습관 추가">+</button>
   </div>
+
+  <!-- Day detail sheet (from calendar) -->
+  <div id="daySheet" class="sheet-backdrop" hidden></div>
 
   <!-- Habit detail (full screen) -->
   <div id="detail" class="detail" hidden></div>
