@@ -1,7 +1,7 @@
 // Network-first cache for the habit tracker PWA.
 // Online -> always serve fresh content (avoids stale UI after deploys).
 // Offline -> fall back to the last cached copy.
-const CACHE = "habit-tracker-v4";
+const CACHE = "habit-tracker-v5";
 const ASSETS = [
   "./",
   "./index.html",

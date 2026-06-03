@@ -3,6 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <!-- Apply saved/system theme before first paint to avoid a flash -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("habits.theme");
+        if (!t) t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+        document.documentElement.dataset.theme = t;
+      } catch (e) { document.documentElement.dataset.theme = "dark"; }
+    })();
+  </script>
   <title>습관 트래커</title>
   <meta name="description" content="매일의 습관을 체크하고 연속 달성 기록을 쌓아보세요." />
 
@@ -27,8 +37,11 @@
         <h1 id="screenTitle">오늘의 습관</h1>
         <p id="todayLabel" class="muted"></p>
       </div>
-      <div class="progress-ring" id="progressRing" aria-hidden="true">
-        <span id="progressText">0/0</span>
+      <div class="topbar-right">
+        <button id="themeBtn" class="icon-btn" aria-label="테마 전환">🌙</button>
+        <div class="progress-ring" id="progressRing" aria-hidden="true">
+          <span id="progressText">0/0</span>
+        </div>
       </div>
     </header>
 

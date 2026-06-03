@@ -555,6 +555,26 @@ function notify(title, body) {
   }
 }
 
+// ---- theme ----
+const THEME_KEY = "habits.theme";
+const themeBtn = document.getElementById("themeBtn");
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  // show the icon for the action (what tapping will switch to)
+  themeBtn.textContent = theme === "light" ? "🌙" : "☀️";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === "light" ? "#f3f4fb" : "#0f1020";
+}
+
+let theme = localStorage.getItem(THEME_KEY) || document.documentElement.dataset.theme || "dark";
+applyTheme(theme);
+themeBtn.addEventListener("click", () => {
+  theme = theme === "light" ? "dark" : "light";
+  localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+});
+
 // ---- init ----
 buildPickers();
 setTab("today");
