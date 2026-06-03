@@ -1,5 +1,5 @@
 // Offline cache for the habit tracker PWA.
-const CACHE = "habit-tracker-v1";
+const CACHE = "habit-tracker-v2";
 const ASSETS = [
   "./",
   "./index.html",
