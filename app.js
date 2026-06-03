@@ -670,7 +670,7 @@ function applyTheme(theme) {
   // show the icon for the action (what tapping will switch to)
   themeBtn.textContent = theme === "light" ? "🌙" : "☀️";
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#ece5d4" : "#17150f";
+  if (meta) meta.content = theme === "light" ? "#ffffff" : "#0b0b0c";
 }
 
 let theme = localStorage.getItem(THEME_KEY) || document.documentElement.dataset.theme || "dark";
