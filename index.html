@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <title>습관 트래커</title>
+  <meta name="description" content="매일의 습관을 체크하고 연속 달성 기록을 쌓아보세요." />
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#6366f1" />
+
+  <!-- iOS standalone web app -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="습관" />
+  <link rel="apple-touch-icon" href="./icons/icon-180.png" />
+  <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <h1>오늘의 습관</h1>
+        <p id="todayLabel" class="muted"></p>
+      </div>
+      <div class="progress-ring" id="progressRing" aria-hidden="true">
+        <span id="progressText">0/0</span>
+      </div>
+    </header>
+
+    <main id="list" class="list"></main>
+
+    <p id="empty" class="empty" hidden>
+      아직 습관이 없어요.<br />아래 <b>+ 버튼</b>으로 첫 습관을 추가해 보세요.
+    </p>
+
+    <button id="addBtn" class="fab" aria-label="습관 추가">+</button>
+  </div>
+
+  <!-- Add / edit sheet -->
+  <div id="sheet" class="sheet-backdrop" hidden>
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <h2 id="sheetTitle">습관 추가</h2>
+      <label class="field">
+        <span>아이콘</span>
+        <div id="emojiRow" class="emoji-row"></div>
+      </label>
+      <label class="field">
+        <span>이름</span>
+        <input id="nameInput" type="text" maxlength="24" placeholder="예: 물 2L 마시기" autocomplete="off" />
+      </label>
+      <label class="field">
+        <span>색상</span>
+        <div id="colorRow" class="color-row"></div>
+      </label>
+      <div class="sheet-actions">
+        <button id="cancelBtn" class="btn ghost">취소</button>
+        <button id="saveBtn" class="btn primary">저장</button>
+      </div>
+      <button id="deleteBtn" class="btn danger" hidden>이 습관 삭제</button>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
