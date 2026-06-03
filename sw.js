@@ -1,5 +1,7 @@
-// Offline cache for the habit tracker PWA.
-const CACHE = "habit-tracker-v3";
+// Network-first cache for the habit tracker PWA.
+// Online -> always serve fresh content (avoids stale UI after deploys).
+// Offline -> fall back to the last cached copy.
+const CACHE = "habit-tracker-v4";
 const ASSETS = [
   "./",
   "./index.html",
@@ -23,19 +25,15 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Cache-first, falling back to network (and caching new GETs).
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(event.request, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match("./index.html"));
-    })
+    fetch(event.request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(event.request, copy)).catch(() => {});
+        return res;
+      })
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html")))
   );
 });
