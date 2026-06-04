@@ -8,9 +8,11 @@
     (function () {
       try {
         var t = localStorage.getItem("habits.theme");
-        if (!t) t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+        if (t === "light") t = "pink";
+        if (t === "dark") t = "carbon";
+        if (!t) t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) ? "carbon" : "pink";
         document.documentElement.dataset.theme = t;
-      } catch (e) { document.documentElement.dataset.theme = "dark"; }
+      } catch (e) { document.documentElement.dataset.theme = "pink"; }
     })();
   </script>
   <title>습관 트래커</title>
@@ -36,7 +38,7 @@
       <div class="check-top">
         <span class="wordmark">Habit Check</span>
         <span class="check-top-right">
-          <button id="themeBtn" class="icon-btn" aria-label="테마 전환">🌙</button>
+          <button id="themeBtn" class="icon-btn" aria-label="테마 고르기">🎨</button>
           <span class="serial" id="serial">№ 0000</span>
         </span>
       </div>
@@ -92,6 +94,9 @@
 
   <!-- Day detail sheet (from calendar) -->
   <div id="daySheet" class="sheet-backdrop" hidden></div>
+
+  <!-- Theme picker sheet -->
+  <div id="themeSheet" class="sheet-backdrop" hidden></div>
 
   <!-- Habit detail (full screen) -->
   <div id="detail" class="detail" hidden></div>

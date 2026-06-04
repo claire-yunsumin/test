@@ -721,25 +721,58 @@ function notify(title, body) {
   }
 }
 
-// ---- theme ----
+// ---- theme picker (selectable guest-check paper colors) ----
 const THEME_KEY = "habits.theme";
 const themeBtn = document.getElementById("themeBtn");
+const themeSheet = document.getElementById("themeSheet");
+const THEMES = [
+  { id: "pink",   name: "핑크 전표",  paper: "#fbe7e2", ink: "#283f86", stamp: "#d12f2f" },
+  { id: "mint",   name: "민트 전표",  paper: "#e4f1e6", ink: "#235c3f", stamp: "#cf3b3b" },
+  { id: "blue",   name: "블루 전표",  paper: "#e4ecf6", ink: "#1f3a8a", stamp: "#d12f2f" },
+  { id: "cream",  name: "크림 전표",  paper: "#f6eed4", ink: "#463821", stamp: "#c8431f" },
+  { id: "carbon", name: "카본 다크",  paper: "#181b29", ink: "#c9d3f2", stamp: "#ff5b5b" },
+];
+function migrateTheme(v) { return v === "light" ? "pink" : v === "dark" ? "carbon" : v; }
+let currentTheme = migrateTheme(localStorage.getItem(THEME_KEY)) ||
+  (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "carbon" : "pink");
 
-function applyTheme(theme) {
-  document.documentElement.dataset.theme = theme;
-  // show the icon for the action (what tapping will switch to)
-  themeBtn.textContent = theme === "light" ? "🌙" : "☀️";
+function applyTheme(id) {
+  currentTheme = id;
+  document.documentElement.dataset.theme = id;
+  const t = THEMES.find((x) => x.id === id) || THEMES[0];
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#fbe7e2" : "#181b29";
+  if (meta) meta.content = t.paper;
 }
+applyTheme(currentTheme);
 
-let theme = localStorage.getItem(THEME_KEY) || document.documentElement.dataset.theme || "dark";
-applyTheme(theme);
-themeBtn.addEventListener("click", () => {
-  theme = theme === "light" ? "dark" : "light";
-  localStorage.setItem(THEME_KEY, theme);
-  applyTheme(theme);
-});
+function openThemeSheet() {
+  themeSheet.innerHTML = `
+    <div class="sheet">
+      <h2>테마 고르기</h2>
+      <div class="theme-grid">
+        ${THEMES.map((t) => `
+          <button class="theme-opt${t.id === currentTheme ? " sel" : ""}" data-id="${t.id}">
+            <span class="theme-chip" style="background:${t.paper}">
+              <span class="tc-ink" style="background:${t.ink}"></span>
+              <span class="tc-stamp" style="background:${t.stamp}"></span>
+            </span>
+            <span class="theme-name">${t.name}</span>
+          </button>`).join("")}
+      </div>
+      <div class="sheet-actions"><button class="btn primary" id="th_close">닫기</button></div>
+    </div>`;
+  themeSheet.hidden = false;
+  themeSheet.querySelector("#th_close").onclick = () => { themeSheet.hidden = true; };
+  themeSheet.querySelectorAll(".theme-opt").forEach((b) => {
+    b.onclick = () => {
+      applyTheme(b.dataset.id);
+      localStorage.setItem(THEME_KEY, b.dataset.id);
+      themeSheet.querySelectorAll(".theme-opt").forEach((x) => x.classList.toggle("sel", x === b));
+    };
+  });
+}
+themeBtn.addEventListener("click", openThemeSheet);
+themeSheet.addEventListener("click", (e) => { if (e.target === themeSheet) themeSheet.hidden = true; });
 
 // ---- init ----
 buildPickers();

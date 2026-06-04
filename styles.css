@@ -1,45 +1,68 @@
-/* ── "Guest Check" vintage receipt-pad theme ───────────────────── */
+/* ── "Guest Check" themes — user-selectable paper colors ────────── */
 :root {
-  /* carbon-copy night: dark navy paper + pale-blue ink + red stamp */
-  --bg: #181b29;
-  --bg-elev: #222637;
-  --card: #1e2231;
-  --text: #c9d3f2;
-  --muted: #7c84a2;
-  --line: #353c58;
-  --accent: #ff5b5b;          /* red stamp / completed */
-  --on-spot: #181b29;
-  --dot: rgba(201, 211, 242, 0.06);
-  --h1: rgba(255, 91, 91, 0.20);
-  --h2: rgba(255, 91, 91, 0.45);
-  --h3: rgba(255, 91, 91, 0.72);
-  --h4: #ff5b5b;
-  --heat-text: #ffffff;
-  --shadow: rgba(0, 0, 0, 0.5);
-  --gold: #ff5b5b;
   --script: "Snell Roundhand", "Apple Chancery", "Brush Script MT", cursive;
+  --on-spot: #ffffff;
+  --heat-text: #ffffff;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* default palette = carbon (dark) */
+  --bg: #181b29; --bg-elev: #222637; --card: #1e2231;
+  --text: #c9d3f2; --muted: #7c84a2; --line: #353c58;
+  --accent: #ff5b5b; --gold: #ff5b5b;
+  --dot: rgba(201, 211, 242, 0.06);
+  --h1: rgba(255, 91, 91, 0.20); --h2: rgba(255, 91, 91, 0.45);
+  --h3: rgba(255, 91, 91, 0.72); --h4: #ff5b5b;
+  --shadow: rgba(0, 0, 0, 0.5);
 }
 
-:root[data-theme="light"] {
-  /* pink guest-check paper + blue ink + red stamp */
-  --bg: #fbe7e2;
-  --bg-elev: #f5dbd4;
-  --card: #fdf2ef;
-  --text: #283f86;            /* guest-check blue ink */
-  --muted: #9b8088;
-  --line: #c3cae8;            /* pale blue rule */
-  --accent: #d12f2f;          /* red stamp */
-  --on-spot: #ffffff;
+:root[data-theme="pink"] {
+  --bg: #fbe7e2; --bg-elev: #f5dbd4; --card: #fdf2ef;
+  --text: #283f86; --muted: #9b8088; --line: #c3cae8;
+  --accent: #d12f2f; --gold: #d12f2f;
   --dot: rgba(40, 63, 134, 0.06);
-  --h1: rgba(209, 47, 47, 0.16);
-  --h2: rgba(209, 47, 47, 0.40);
-  --h3: rgba(209, 47, 47, 0.68);
-  --h4: #d12f2f;
-  --heat-text: #ffffff;
+  --h1: rgba(209, 47, 47, 0.16); --h2: rgba(209, 47, 47, 0.40);
+  --h3: rgba(209, 47, 47, 0.68); --h4: #d12f2f;
   --shadow: rgba(40, 63, 134, 0.16);
-  --gold: #d12f2f;
+}
+
+:root[data-theme="mint"] {
+  --bg: #e4f1e6; --bg-elev: #d5e8d9; --card: #f0f8f1;
+  --text: #235c3f; --muted: #7d9285; --line: #b6d6c2;
+  --accent: #cf3b3b; --gold: #cf3b3b;
+  --dot: rgba(35, 92, 63, 0.06);
+  --h1: rgba(207, 59, 59, 0.16); --h2: rgba(207, 59, 59, 0.40);
+  --h3: rgba(207, 59, 59, 0.68); --h4: #cf3b3b;
+  --shadow: rgba(35, 92, 63, 0.16);
+}
+
+:root[data-theme="blue"] {
+  --bg: #e4ecf6; --bg-elev: #d3e0f0; --card: #f1f5fb;
+  --text: #1f3a8a; --muted: #7c89a6; --line: #b6c8e6;
+  --accent: #d12f2f; --gold: #d12f2f;
+  --dot: rgba(31, 58, 138, 0.06);
+  --h1: rgba(209, 47, 47, 0.16); --h2: rgba(209, 47, 47, 0.40);
+  --h3: rgba(209, 47, 47, 0.68); --h4: #d12f2f;
+  --shadow: rgba(31, 58, 138, 0.16);
+}
+
+:root[data-theme="cream"] {
+  --bg: #f6eed4; --bg-elev: #ece1bf; --card: #fbf6e6;
+  --text: #463821; --muted: #998a6a; --line: #ddcfa6;
+  --accent: #c8431f; --gold: #c8431f;
+  --dot: rgba(70, 56, 33, 0.07);
+  --h1: rgba(200, 67, 31, 0.16); --h2: rgba(200, 67, 31, 0.40);
+  --h3: rgba(200, 67, 31, 0.68); --h4: #c8431f;
+  --shadow: rgba(70, 56, 33, 0.16);
+}
+
+:root[data-theme="carbon"] {
+  --bg: #181b29; --bg-elev: #222637; --card: #1e2231;
+  --text: #c9d3f2; --muted: #7c84a2; --line: #353c58;
+  --accent: #ff5b5b; --gold: #ff5b5b;
+  --dot: rgba(201, 211, 242, 0.06);
+  --h1: rgba(255, 91, 91, 0.20); --h2: rgba(255, 91, 91, 0.45);
+  --h3: rgba(255, 91, 91, 0.72); --h4: #ff5b5b;
+  --shadow: rgba(0, 0, 0, 0.5);
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -76,7 +99,7 @@ body::after {
 }
 
 /* monochrome emoji to keep the 2-color print look */
-.habit-emoji, .day-row-emoji, .emoji-opt, .icon-btn,
+.habit-emoji, .day-row-emoji, .emoji-opt,
 .bar-emoji, .detail-title, .habit-streak, .stat-card .big {
   filter: grayscale(1);
 }
@@ -359,6 +382,28 @@ body::after {
 .btn.primary { background: var(--accent); color: var(--on-spot); }
 .btn.ghost { background: var(--card); color: var(--text); }
 .btn.danger { background: var(--card); color: var(--text); border-style: dashed; }
+
+/* ── Theme picker ───────────────────────────────────────────────── */
+.theme-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.theme-opt {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 2px solid var(--text);
+  border-radius: 3px; padding: 10px 12px; cursor: pointer;
+  width: 100%; text-align: left; font-family: inherit;
+}
+.theme-opt.sel { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+.theme-chip {
+  position: relative; width: 50px; height: 34px; flex: none;
+  border-radius: 3px; border: 1.5px solid rgba(128, 128, 128, 0.5);
+  overflow: hidden;
+}
+.tc-ink { position: absolute; left: 6px; top: 9px; width: 26px; height: 3px; border-radius: 2px; }
+.tc-ink::after {
+  content: ""; position: absolute; left: 0; top: 7px; width: 20px; height: 3px;
+  border-radius: 2px; background: inherit; opacity: 0.7;
+}
+.tc-stamp { position: absolute; right: 6px; bottom: 6px; width: 13px; height: 13px; border-radius: 50%; }
+.theme-name { font-weight: 800; font-size: 15px; color: var(--text); }
 
 /* ── Vault / gamification ───────────────────────────────────────── */
 .vault-hero { text-align: center; margin: 8px 0 18px; }
