@@ -404,8 +404,16 @@ function renderVaultView() {
   const month = monthCoins(t.getFullYear(), t.getMonth());
   const todayC = habits.filter((h) => h.history[TODAY_KEY]).length;
 
-  const shown = Math.min(total, 120);
-  const bars = "<div class=\"gold-bar\"></div>".repeat(shown);
+  // build a gold pyramid: widest row at the bottom, partial row at the apex
+  const shown = Math.min(total, 28);
+  let base = 1;
+  while ((base * (base + 1)) / 2 < shown) base++;
+  const rows = [];
+  let rem = shown, w = base;
+  while (rem > 0) { const c = Math.min(w, rem); rows.push(c); rem -= c; w--; }
+  rows.reverse();
+  const bar = `<div class="gold-bar"><span class="bar-mark">999.9</span></div>`;
+  const stack = rows.map((c) => `<div class="gold-row">${bar.repeat(c)}</div>`).join("");
   const overflow = total - shown;
 
   vaultView.innerHTML = `
@@ -421,7 +429,7 @@ function renderVaultView() {
     <div class="vault-box">
       ${total === 0
         ? `<p class="empty">습관을 체크하면<br />금고에 금괴가 쌓여요.</p>`
-        : `<div class="vault-stack">${bars}</div>`}
+        : `<div class="vault-stack">${stack}</div>`}
       ${overflow > 0 ? `<p class="hint">+ ${overflow}개 더 쌓여 있어요</p>` : ""}
     </div>
     <p class="hint">습관을 하나 완료할 때마다 금괴 1개가 금고에 적립돼요.</p>

@@ -422,14 +422,16 @@ body::after {
   border-radius: 3px; padding: 18px; margin-top: 16px; min-height: 96px;
 }
 .vault-stack {
-  display: flex; flex-wrap: wrap; gap: 7px 4px;
-  justify-content: center; align-items: flex-end;
-  padding-top: 8px;
+  display: flex; flex-direction: column; align-items: center;
+  padding-top: 10px;
 }
+.gold-row { display: flex; gap: 4px; }
+.gold-row + .gold-row { margin-top: -2px; }   /* rows tuck together into a stack */
+
 /* realistic 3D gold ingot — fixed gold, independent of theme */
 .gold-bar {
   position: relative;
-  width: 34px; height: 17px; margin-top: 6px;
+  width: 38px; height: 19px; margin-top: 7px;
   border-radius: 1px 1px 2px 2px;
   background: linear-gradient(180deg, #ffe98c 0%, #f5cd5a 38%, #e3a934 72%, #b9831d 100%);
   box-shadow:
@@ -443,9 +445,17 @@ body::after {
   clip-path: polygon(16% 0, 84% 0, 100% 100%, 0% 100%);
 }
 .gold-bar::after {             /* diagonal glint */
-  content: ""; position: absolute; left: 16%; top: 2px; width: 26%; height: 62%;
+  content: ""; position: absolute; left: 14%; top: 2px; width: 22%; height: 60%;
   background: linear-gradient(120deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
   transform: skewX(-14deg); border-radius: 2px;
+}
+.bar-mark {                    /* engraved 999.9 purity stamp */
+  position: absolute; left: 0; right: 0; bottom: 3px;
+  text-align: center;
+  font-family: var(--mono); font-size: 7px; font-weight: 700;
+  color: rgba(110, 72, 8, 0.72);
+  text-shadow: 0 0.5px 0 rgba(255, 248, 200, 0.5);
+  letter-spacing: -0.03em; pointer-events: none;
 }
 
 /* floating "+1" reward stamp */
