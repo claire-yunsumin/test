@@ -421,10 +421,31 @@ body::after {
   border: 2px solid var(--text);
   border-radius: 3px; padding: 18px; margin-top: 16px; min-height: 96px;
 }
-.vault-stack { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; align-items: flex-end; }
+.vault-stack {
+  display: flex; flex-wrap: wrap; gap: 7px 4px;
+  justify-content: center; align-items: flex-end;
+  padding-top: 8px;
+}
+/* realistic 3D gold ingot — fixed gold, independent of theme */
 .gold-bar {
-  width: 30px; height: 15px; border-radius: 2px;
-  background: var(--accent); border: 1.5px solid var(--text);
+  position: relative;
+  width: 34px; height: 17px; margin-top: 6px;
+  border-radius: 1px 1px 2px 2px;
+  background: linear-gradient(180deg, #ffe98c 0%, #f5cd5a 38%, #e3a934 72%, #b9831d 100%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    inset 0 -2px 3px rgba(120, 78, 12, 0.55),
+    0 2px 3px rgba(0, 0, 0, 0.30);
+}
+.gold-bar::before {            /* angled top face */
+  content: ""; position: absolute; left: 3px; right: 3px; top: -6px; height: 7px;
+  background: linear-gradient(180deg, #fff4bf 0%, #f7d873 100%);
+  clip-path: polygon(16% 0, 84% 0, 100% 100%, 0% 100%);
+}
+.gold-bar::after {             /* diagonal glint */
+  content: ""; position: absolute; left: 16%; top: 2px; width: 26%; height: 62%;
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+  transform: skewX(-14deg); border-radius: 2px;
 }
 
 /* floating "+1" reward stamp */
@@ -432,10 +453,11 @@ body::after {
 .coin-pop {
   position: absolute; left: 50%; top: 52%;
   transform: translateX(-50%);
-  font-size: 30px; font-weight: 800; color: var(--accent);
-  border: 3px solid var(--accent); padding: 4px 14px; border-radius: 4px;
-  background: var(--card);
-  white-space: nowrap; letter-spacing: 0.02em;
+  font-size: 26px; font-weight: 800; color: #5a3d0a;
+  border: 2px solid #b9831d; padding: 6px 16px; border-radius: 7px;
+  background: linear-gradient(180deg, #ffe88a 0%, #e7af36 100%);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  white-space: nowrap; letter-spacing: 0.01em;
   animation: coinUp 1s ease-out forwards;
 }
 @keyframes coinUp {
