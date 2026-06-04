@@ -100,6 +100,7 @@ const reorderHint = document.getElementById("reorderHint");
 const todayLabel = document.getElementById("todayLabel");
 const progressRing = document.getElementById("progressRing");
 const progressText = document.getElementById("progressText");
+const serial = document.getElementById("serial");
 const screenTitle = document.getElementById("screenTitle");
 const calendarView = document.getElementById("calendarView");
 const todayView = document.getElementById("todayView");
@@ -144,6 +145,7 @@ function renderTopbar() {
   const total = habits.length;
   progressText.textContent = `${done}/${total}`;
   progressRing.style.setProperty("--pct", (total ? Math.round((done / total) * 100) : 0) + "%");
+  serial.textContent = "№ " + String(totalCoins()).padStart(4, "0");
 }
 
 // ---- today view ----
@@ -728,7 +730,7 @@ function applyTheme(theme) {
   // show the icon for the action (what tapping will switch to)
   themeBtn.textContent = theme === "light" ? "🌙" : "☀️";
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = theme === "light" ? "#ffffff" : "#0b0b0c";
+  if (meta) meta.content = theme === "light" ? "#fbe7e2" : "#181b29";
 }
 
 let theme = localStorage.getItem(THEME_KEY) || document.documentElement.dataset.theme || "dark";

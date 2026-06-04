@@ -33,14 +33,26 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div>
-        <h1 id="screenTitle">오늘의 습관</h1>
-        <p id="todayLabel" class="muted"></p>
+      <div class="check-top">
+        <span class="wordmark">Habit Check</span>
+        <span class="check-top-right">
+          <button id="themeBtn" class="icon-btn" aria-label="테마 전환">🌙</button>
+          <span class="serial" id="serial">№ 0000</span>
+        </span>
       </div>
-      <div class="topbar-right">
-        <button id="themeBtn" class="icon-btn" aria-label="테마 전환">🌙</button>
-        <div class="progress-ring" id="progressRing" aria-hidden="true">
-          <span id="progressText">0/0</span>
+      <div class="check-row">
+        <div class="check-field">
+          <span class="check-lbl">Date</span>
+          <span id="todayLabel" class="check-val"></span>
+        </div>
+        <div class="check-field">
+          <span class="check-lbl">Sheet</span>
+          <span id="screenTitle" class="check-val">오늘의 습관</span>
+        </div>
+        <div class="check-ring">
+          <div class="progress-ring" id="progressRing" aria-hidden="true">
+            <span id="progressText">0/0</span>
+          </div>
         </div>
       </div>
     </header>
@@ -63,6 +75,7 @@
         아직 습관이 없어요.<br />아래 <b>+ 버튼</b>으로 첫 습관을 추가해 보세요.
       </p>
       <p id="reorderHint" class="hint" hidden>습관을 탭해서 들어가면 ▲▼ 버튼으로 순서를 바꿀 수 있어요.</p>
+      <p class="thankyou">Thank You ♡</p>
     </main>
 
     <!-- stats -->
