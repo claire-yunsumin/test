@@ -419,10 +419,10 @@ body::after {
 .vault-unit { font-size: 11px; color: var(--muted); margin-top: 8px; letter-spacing: 0.16em; text-transform: uppercase; font-weight: 700; }
 
 /* skeuomorphic metal safe (fixed gray, independent of theme) */
-.safe { position: relative; margin: 16px auto 0; width: 100%; max-width: 300px; padding-bottom: 12px; }
+.safe { position: relative; margin: 4px auto 0; width: 100%; max-width: 360px; padding-bottom: 12px; }
 .safe-shell {
   position: relative; z-index: 1; display: flex; gap: 10px;
-  height: 228px; padding: 14px; border-radius: 18px;
+  height: 272px; padding: 14px; border-radius: 18px;
   background: linear-gradient(145deg, #e2e6eb 0%, #bdc3cc 50%, #9ba2ad 100%);
   box-shadow:
     inset 0 2px 2px rgba(255, 255, 255, 0.75),
@@ -433,10 +433,33 @@ body::after {
   position: relative; flex: 1; border-radius: 9px;
   background: linear-gradient(180deg, #303237 0%, #141519 100%);
   box-shadow: inset 0 5px 12px rgba(0, 0, 0, 0.85), inset 0 0 0 2px rgba(0, 0, 0, 0.35);
-  display: flex; align-items: flex-end; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
   padding: 12px 8px 10px; overflow: hidden;
 }
 .safe-empty { margin: auto; font-family: var(--mono); font-size: 12px; letter-spacing: 0.25em; color: rgba(255, 255, 255, 0.28); }
+
+/* diamonds shelf (promoted from full gold pyramids) */
+.gem-shelf { margin-bottom: auto; display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; align-items: center; padding-bottom: 8px; }
+.gem {
+  width: 20px; height: 20px;
+  clip-path: polygon(50% 0%, 100% 36%, 50% 100%, 0% 36%);
+  background: linear-gradient(180deg, #d6f3ff 0%, #6cc6f5 42%, #2f93dd 100%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.gem-more { color: #bfe6ff; font-family: var(--mono); font-weight: 700; font-size: 13px; align-self: center; }
+
+/* tally + chips below the safe */
+.vault-tally {
+  display: flex; justify-content: center; gap: 8px; margin-top: 14px;
+}
+.tally-item {
+  font-weight: 800; font-size: 15px; color: var(--text);
+  border: 2px solid var(--text); border-radius: 6px; padding: 5px 12px;
+  background: var(--card);
+}
+.tally-item.total-c { background: var(--accent); color: var(--on-spot); border-color: var(--accent); }
+.cal-summary.small { margin-top: 10px; }
+.cal-summary.small .chip { padding: 6px 10px; font-size: 12px; }
 .safe-door {
   position: relative; flex: none; width: 76px; border-radius: 9px;
   background: linear-gradient(145deg, #eef1f4 0%, #c5cad2 55%, #a3aab4 100%);

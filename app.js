@@ -404,41 +404,40 @@ function closeDaySheet() { daySheet.hidden = true; }
 daySheet.addEventListener("click", (e) => { if (e.target === daySheet) closeDaySheet(); });
 
 // ---- vault view ----
+const SAFE_CAP = 28;   // a full gold pyramid; this many bars -> 1 diamond
+
 function renderVaultView() {
   const t = today();
   const total = totalCoins();
   const month = monthCoins(t.getFullYear(), t.getMonth());
   const todayC = habits.filter((h) => h.history[TODAY_KEY]).length;
 
-  // build a gold pyramid: widest row at the bottom, partial row at the apex
-  const shown = Math.min(total, 15);
+  const diamonds = Math.floor(total / SAFE_CAP);
+  const bars = total % SAFE_CAP;            // gold currently in the safe (0..27)
+
+  // gold pyramid for the loose bars: widest row at the bottom, partial at the apex
   let base = 1;
-  while ((base * (base + 1)) / 2 < shown) base++;
+  while ((base * (base + 1)) / 2 < bars) base++;
   const rows = [];
-  let rem = shown, w = base;
+  let rem = bars, w = base;
   while (rem > 0) { const c = Math.min(w, rem); rows.push(c); rem -= c; w--; }
   rows.reverse();
   const bar = `<div class="gold-bar"><span class="bar-mark">999.9</span></div>`;
   const stack = rows.map((c) => `<div class="gold-row">${bar.repeat(c)}</div>`).join("");
-  const overflow = total - shown;
+
+  // diamonds on the top shelf
+  const gemShown = Math.min(diamonds, 18);
+  const gems = `<span class="gem"></span>`.repeat(gemShown) +
+    (diamonds > gemShown ? `<span class="gem-more">×${diamonds}</span>` : "");
+
+  const interior = total === 0
+    ? `<p class="safe-empty">EMPTY</p>`
+    : `${diamonds > 0 ? `<div class="gem-shelf">${gems}</div>` : ""}${stack ? `<div class="vault-stack">${stack}</div>` : ""}`;
 
   vaultView.innerHTML = `
-    <div class="vault-hero">
-      <div class="vault-count">${total}</div>
-      <div class="vault-unit">금괴 (GOLD BARS)</div>
-    </div>
-    <div class="cal-summary">
-      <div class="chip">오늘 <b>+${todayC}</b></div>
-      <div class="chip">이번 달 <b>+${month}</b></div>
-      <div class="chip">전체 <b>${total}</b></div>
-    </div>
     <div class="safe">
       <div class="safe-shell">
-        <div class="safe-interior">
-          ${total === 0
-            ? `<p class="safe-empty">EMPTY</p>`
-            : `<div class="vault-stack">${stack}</div>`}
-        </div>
+        <div class="safe-interior">${interior}</div>
         <div class="safe-door">
           <div class="safe-dial"><i></i><i></i><i></i></div>
         </div>
@@ -446,8 +445,18 @@ function renderVaultView() {
       <span class="safe-foot l"></span>
       <span class="safe-foot r"></span>
     </div>
-    ${overflow > 0 ? `<p class="hint">+ ${overflow}개 더 금고에 있어요</p>` : ""}
-    <p class="hint">습관을 하나 완료할 때마다 금괴 1개가 금고에 적립돼요.</p>
+
+    <div class="vault-tally">
+      <span class="tally-item gem-c">💎 ${diamonds}</span>
+      <span class="tally-item bar-c">🪙 ${bars}</span>
+      <span class="tally-item total-c">합계 ${total}</span>
+    </div>
+    <div class="cal-summary small">
+      <div class="chip">오늘 <b>+${todayC}</b></div>
+      <div class="chip">이번 달 <b>+${month}</b></div>
+      <div class="chip">전체 <b>${total}</b></div>
+    </div>
+    <p class="hint">금괴 ${SAFE_CAP}개가 모이면 💎 다이아 1개로 바뀌어요.</p>
   `;
 }
 
