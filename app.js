@@ -185,13 +185,19 @@ function renderCard(habit) {
   emoji.addEventListener("click", openDetail);
   info.addEventListener("click", openDetail);
 
+  const edit = document.createElement("button");
+  edit.className = "edit-btn";
+  edit.textContent = "✎";
+  edit.setAttribute("aria-label", "습관 편집");
+  edit.addEventListener("click", (e) => { e.stopPropagation(); openSheet(habit); });
+
   const check = document.createElement("button");
   check.className = "check" + (habit.history[TODAY_KEY] ? " done" : "");
   check.textContent = "✓";
   check.setAttribute("aria-label", "오늘 완료 토글");
   check.addEventListener("click", () => toggle(habit, TODAY_KEY));
 
-  top.append(emoji, info, check);
+  top.append(emoji, info, edit, check);
 
   const week = document.createElement("div");
   week.className = "week";
