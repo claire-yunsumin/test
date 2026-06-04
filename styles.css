@@ -1,6 +1,7 @@
 /* ── "Guest Check" themes — user-selectable paper colors ────────── */
 :root {
   --script: "Snell Roundhand", "Apple Chancery", "Brush Script MT", cursive;
+  --mono: ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", "Courier New", monospace;
   --on-spot: #ffffff;
   --heat-text: #ffffff;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -441,4 +442,12 @@ body::after {
   0% { opacity: 0; transform: translate(-50%, 12px) rotate(-6deg) scale(0.7); }
   20% { opacity: 1; transform: translate(-50%, 0) rotate(-6deg) scale(1.1); }
   100% { opacity: 0; transform: translate(-50%, -80px) rotate(-6deg) scale(1); }
+}
+
+/* ── Monospace, tabular numerals for numeric UI ─────────────────── */
+body { font-variant-numeric: tabular-nums; }
+#progressText, .vault-count, .cal-cell, .chip b, .stat-card .big,
+.serial, .reminder-row input[type="time"] {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
