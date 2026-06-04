@@ -130,7 +130,7 @@ function gainCoin() {
   if (navigator.vibrate) navigator.vibrate(12);
   const el = document.createElement("div");
   el.className = "coin-pop";
-  el.textContent = "＋1 🪙";
+  el.textContent = "＋1 금괴";
   coinLayer.appendChild(el);
   setTimeout(() => el.remove(), 1000);
 }
