@@ -75,7 +75,7 @@ body {
   background-color: var(--bg);
   background-image: radial-gradient(var(--dot) 1.3px, transparent 1.5px);
   background-size: 18px 18px;
-  font-family: "Helvetica Neue", Helvetica, Arial, "Apple SD Gothic Neo", sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, "Gowun Dodum", "Apple SD Gothic Neo", sans-serif;
   font-weight: 500;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior-y: none;
