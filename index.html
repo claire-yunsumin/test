@@ -50,6 +50,7 @@
       <button class="tab active" data-tab="calendar">캘린더</button>
       <button class="tab" data-tab="today">오늘</button>
       <button class="tab" data-tab="stats">통계</button>
+      <button class="tab" data-tab="vault">금고</button>
     </nav>
 
     <!-- calendar (home) -->
@@ -67,8 +68,14 @@
     <!-- stats -->
     <main id="statsView" hidden></main>
 
+    <!-- vault (gamification) -->
+    <main id="vaultView" hidden></main>
+
     <button id="addBtn" class="fab" aria-label="습관 추가">+</button>
   </div>
+
+  <!-- Floating coin reward layer -->
+  <div id="coinLayer"></div>
 
   <!-- Day detail sheet (from calendar) -->
   <div id="daySheet" class="sheet-backdrop" hidden></div>

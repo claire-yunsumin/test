@@ -15,6 +15,7 @@
   --h4: rgba(245, 245, 243, 0.95);
   --heat-text: #0b0b0c;
   --shadow: rgba(0, 0, 0, 0.6);
+  --gold: #d4af37;            /* the one intentional color: gold bars */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -322,3 +323,45 @@ body {
 .btn.primary { background: var(--accent); color: var(--bg); }
 .btn.ghost { background: var(--card); color: var(--text); }
 .btn.danger { background: var(--card); color: var(--text); border-style: dashed; }
+
+/* ── Vault / gamification ───────────────────────────────────────── */
+.vault-hero { text-align: center; margin: 8px 0 18px; }
+.vault-count {
+  font-size: 64px; font-weight: 800; line-height: 1;
+  color: var(--gold); letter-spacing: -0.02em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
+}
+.vault-unit { font-size: 15px; color: var(--muted); margin-top: 6px; letter-spacing: 0.15em; }
+
+.vault-box {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; padding: 18px; margin-top: 16px; min-height: 96px;
+}
+.vault-stack {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  justify-content: center; align-items: flex-end;
+}
+.gold-bar {
+  width: 30px; height: 15px; border-radius: 2px;
+  background: linear-gradient(180deg, #f4d97e 0%, var(--gold) 55%, #a8801a 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+/* floating "+1" reward */
+#coinLayer {
+  position: fixed; inset: 0; z-index: 50;
+  pointer-events: none; overflow: hidden;
+}
+.coin-pop {
+  position: absolute; left: 50%; top: 52%;
+  transform: translateX(-50%);
+  font-size: 30px; font-weight: 800; color: var(--gold);
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+  animation: coinUp 1s ease-out forwards;
+}
+@keyframes coinUp {
+  0% { opacity: 0; transform: translate(-50%, 12px) scale(0.7); }
+  20% { opacity: 1; transform: translate(-50%, 0) scale(1.12); }
+  100% { opacity: 0; transform: translate(-50%, -80px) scale(1); }
+}

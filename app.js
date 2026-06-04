@@ -104,9 +104,36 @@ const screenTitle = document.getElementById("screenTitle");
 const calendarView = document.getElementById("calendarView");
 const todayView = document.getElementById("todayView");
 const statsView = document.getElementById("statsView");
+const vaultView = document.getElementById("vaultView");
+const coinLayer = document.getElementById("coinLayer");
 const tabs = document.getElementById("tabs");
 
 let activeTab = "calendar";
+
+// ---- gamification: 1 completion = 1 gold bar in the vault ----
+function totalCoins() {
+  return habits.reduce((sum, h) => sum + Object.values(h.history).filter(Boolean).length, 0);
+}
+function monthCoins(y, m) {
+  let n = 0;
+  for (const h of habits) {
+    for (const k in h.history) {
+      if (!h.history[k]) continue;
+      const d = new Date(k + "T00:00:00");
+      if (d.getFullYear() === y && d.getMonth() === m) n++;
+    }
+  }
+  return n;
+}
+// floating "+1" reward, fired whenever a completion is newly added
+function gainCoin() {
+  if (navigator.vibrate) navigator.vibrate(12);
+  const el = document.createElement("div");
+  el.className = "coin-pop";
+  el.textContent = "＋1 🪙";
+  coinLayer.appendChild(el);
+  setTimeout(() => el.remove(), 1000);
+}
 
 // ---- top bar ----
 function renderTopbar() {
@@ -188,10 +215,7 @@ function renderCard(habit) {
 
 function toggle(habit, key) {
   if (habit.history[key]) delete habit.history[key];
-  else {
-    habit.history[key] = true;
-    if (navigator.vibrate) navigator.vibrate(10);
-  }
+  else { habit.history[key] = true; gainCoin(); }
   save();
   rerender();
 }
@@ -360,7 +384,7 @@ function openDaySheet(key) {
       const h = habits.find((x) => x.id === r.dataset.id);
       if (!h) return;
       if (h.history[key]) delete h.history[key];
-      else { h.history[key] = true; if (navigator.vibrate) navigator.vibrate(10); }
+      else { h.history[key] = true; gainCoin(); }
       save();
       r.querySelector(".check").classList.toggle("done", !!h.history[key]);
       renderCalendarView();
@@ -371,14 +395,47 @@ function openDaySheet(key) {
 function closeDaySheet() { daySheet.hidden = true; }
 daySheet.addEventListener("click", (e) => { if (e.target === daySheet) closeDaySheet(); });
 
+// ---- vault view ----
+function renderVaultView() {
+  const t = today();
+  const total = totalCoins();
+  const month = monthCoins(t.getFullYear(), t.getMonth());
+  const todayC = habits.filter((h) => h.history[TODAY_KEY]).length;
+
+  const shown = Math.min(total, 120);
+  const bars = "<div class=\"gold-bar\"></div>".repeat(shown);
+  const overflow = total - shown;
+
+  vaultView.innerHTML = `
+    <div class="vault-hero">
+      <div class="vault-count">${total}</div>
+      <div class="vault-unit">금괴 (GOLD BARS)</div>
+    </div>
+    <div class="cal-summary">
+      <div class="chip">오늘 <b>+${todayC}</b></div>
+      <div class="chip">이번 달 <b>+${month}</b></div>
+      <div class="chip">전체 <b>${total}</b></div>
+    </div>
+    <div class="vault-box">
+      ${total === 0
+        ? `<p class="empty">습관을 체크하면<br />금고에 금괴가 쌓여요.</p>`
+        : `<div class="vault-stack">${bars}</div>`}
+      ${overflow > 0 ? `<p class="hint">+ ${overflow}개 더 쌓여 있어요</p>` : ""}
+    </div>
+    <p class="hint">습관을 하나 완료할 때마다 금괴 1개가 금고에 적립돼요.</p>
+  `;
+}
+
 // ---- tabs ----
+const TAB_TITLES = { calendar: "한 달 현황", today: "오늘의 습관", stats: "통계", vault: "나의 금고" };
 function setTab(tab) {
   activeTab = tab;
   [...tabs.children].forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   calendarView.hidden = tab !== "calendar";
   todayView.hidden = tab !== "today";
   statsView.hidden = tab !== "stats";
-  screenTitle.textContent = tab === "calendar" ? "한 달 현황" : tab === "today" ? "오늘의 습관" : "통계";
+  vaultView.hidden = tab !== "vault";
+  screenTitle.textContent = TAB_TITLES[tab] || "습관";
   rerender();
 }
 tabs.addEventListener("click", (e) => {
@@ -390,7 +447,8 @@ function rerender() {
   renderTopbar();
   if (activeTab === "calendar") renderCalendarView();
   else if (activeTab === "today") renderToday();
-  else renderStats();
+  else if (activeTab === "stats") renderStats();
+  else renderVaultView();
 }
 
 // ---- detail view (calendar + stats + reminder + reorder) ----
@@ -544,7 +602,7 @@ function renderCalendar(habit) {
     if (!isFuture) {
       cell.onclick = () => {
         if (habit.history[key]) delete habit.history[key];
-        else habit.history[key] = true;
+        else { habit.history[key] = true; gainCoin(); }
         save();
         renderDetail();
       };
