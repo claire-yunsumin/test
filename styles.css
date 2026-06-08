@@ -26,6 +26,16 @@
   --shadow: rgba(40, 63, 134, 0.16);
 }
 
+:root[data-theme="french"] {
+  --bg: #f6dde6; --bg-elev: #efcedb; --card: #fcebf1;
+  --text: #7c4a5e; --muted: #b18a98; --line: #e6bdce;
+  --accent: #c15a7b; --gold: #c15a7b;
+  --dot: rgba(124, 74, 94, 0.07);
+  --h1: rgba(193, 90, 123, 0.16); --h2: rgba(193, 90, 123, 0.40);
+  --h3: rgba(193, 90, 123, 0.68); --h4: #c15a7b;
+  --shadow: rgba(124, 74, 94, 0.16);
+}
+
 :root[data-theme="mint"] {
   --bg: #e4f1e6; --bg-elev: #d5e8d9; --card: #f0f8f1;
   --text: #235c3f; --muted: #7d9285; --line: #b6d6c2;
@@ -117,6 +127,10 @@ body::after {
   font-family: var(--script); font-style: italic; font-weight: 600;
   font-size: 30px; line-height: 1; color: var(--text);
 }
+:root[data-theme="french"] .wordmark::after {
+  content: "🎀"; font-size: 15px; margin-left: 6px; vertical-align: 4px;
+}
+:root[data-theme="french"] .thankyou::after { content: " 🎀"; font-size: 18px; }
 .check-top-right { display: flex; align-items: center; gap: 10px; }
 .icon-btn {
   width: 34px; height: 34px; border-radius: 3px;

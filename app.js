@@ -759,6 +759,7 @@ const themeBtn = document.getElementById("themeBtn");
 const themeSheet = document.getElementById("themeSheet");
 const THEMES = [
   { id: "pink",   name: "핑크 전표",  paper: "#fbe7e2", ink: "#283f86", stamp: "#d12f2f" },
+  { id: "french", name: "프렌치 살롱", paper: "#f6dde6", ink: "#7c4a5e", stamp: "#c15a7b" },
   { id: "mint",   name: "민트 전표",  paper: "#e4f1e6", ink: "#235c3f", stamp: "#cf3b3b" },
   { id: "blue",   name: "블루 전표",  paper: "#e4ecf6", ink: "#1f3a8a", stamp: "#d12f2f" },
   { id: "cream",  name: "크림 전표",  paper: "#f6eed4", ink: "#463821", stamp: "#c8431f" },
