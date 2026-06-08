@@ -34,6 +34,8 @@
   --h1: rgba(193, 90, 123, 0.16); --h2: rgba(193, 90, 123, 0.40);
   --h3: rgba(193, 90, 123, 0.68); --h4: #c15a7b;
   --shadow: rgba(124, 74, 94, 0.16);
+  --bow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='28' viewBox='0 0 40 28' fill='none' stroke='%23c47e98' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 14 C10 4 2 8 6 14 C2 20 10 24 20 14Z'/%3E%3Cpath d='M20 14 C30 4 38 8 34 14 C38 20 30 24 20 14Z'/%3E%3Ccircle cx='20' cy='14' r='2.4'/%3E%3Cpath d='M20 16 C17 21 15 25 13 27'/%3E%3Cpath d='M20 16 C23 21 25 25 27 27'/%3E%3C/svg%3E");
+  --pearls: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='8'%3E%3Cline x1='0' y1='4' x2='16' y2='4' stroke='%23cf9bb1' stroke-width='0.8'/%3E%3Ccircle cx='8' cy='4' r='2.6' fill='%23e6bccd' stroke='%23c47e98' stroke-width='0.6'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="mint"] {
@@ -127,10 +129,28 @@ body::after {
   font-family: var(--script); font-style: italic; font-weight: 600;
   font-size: 30px; line-height: 1; color: var(--text);
 }
+/* French salon: dainty line-art ribbons & pearls */
 :root[data-theme="french"] .wordmark::after {
-  content: "🎀"; font-size: 15px; margin-left: 6px; vertical-align: 4px;
+  content: ""; display: inline-block; width: 27px; height: 19px; margin-left: 8px;
+  vertical-align: middle; background: var(--bow) center/contain no-repeat;
 }
-:root[data-theme="french"] .thankyou::after { content: " 🎀"; font-size: 18px; }
+:root[data-theme="french"] .thankyou::after {
+  content: ""; display: inline-block; width: 24px; height: 17px; margin-left: 8px;
+  vertical-align: middle; background: var(--bow) center/contain no-repeat;
+}
+:root[data-theme="french"] .topbar { position: relative; }
+:root[data-theme="french"] .topbar::after {
+  content: ""; position: absolute; left: 14px; right: 14px; bottom: -9px; height: 8px;
+  background: var(--pearls) repeat-x center; opacity: 0.85;
+}
+:root[data-theme="french"] .habit,
+:root[data-theme="french"] .stat-card { position: relative; }
+:root[data-theme="french"] .habit::after,
+:root[data-theme="french"] .stat-card::after {
+  content: ""; position: absolute; top: -8px; right: 10px;
+  width: 32px; height: 22px; pointer-events: none;
+  background: var(--bow) center/contain no-repeat;
+}
 .check-top-right { display: flex; align-items: center; gap: 10px; }
 .icon-btn {
   width: 34px; height: 34px; border-radius: 3px;
