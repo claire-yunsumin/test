@@ -763,11 +763,11 @@ const THEMES = [
   { id: "mint",   name: "민트 전표",  paper: "#e4f1e6", ink: "#235c3f", stamp: "#cf3b3b" },
   { id: "blue",   name: "블루 전표",  paper: "#e4ecf6", ink: "#1f3a8a", stamp: "#d12f2f" },
   { id: "cream",  name: "크림 전표",  paper: "#f6eed4", ink: "#463821", stamp: "#c8431f" },
-  { id: "palette", name: "팔레트 2026", paper: "#d9e0cf", ink: "#351e28", stamp: "#ff5c34" },
+  { id: "bakery", name: "베이커리",    paper: "#f5ecd9", ink: "#5b3a1c", stamp: "#c47e2c" },
   { id: "gallery", name: "갤러리",    paper: "#e8e6e1", ink: "#1c1c1a", stamp: "#1c1c1a" },
   { id: "carbon", name: "카본 다크",  paper: "#181b29", ink: "#c9d3f2", stamp: "#ff5b5b" },
 ];
-function migrateTheme(v) { return v === "light" ? "pink" : v === "dark" ? "carbon" : v; }
+function migrateTheme(v) { return v === "light" ? "pink" : v === "dark" ? "carbon" : v === "palette" ? "bakery" : v; }
 let currentTheme = migrateTheme(localStorage.getItem(THEME_KEY)) ||
   (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "carbon" : "pink");
 

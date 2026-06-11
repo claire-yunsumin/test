@@ -78,15 +78,15 @@
   --shadow: rgba(0, 0, 0, 0.5);
 }
 
-:root[data-theme="palette"] {
-  /* Pinterest 2026: sage paper · cassis ink · orange-topaze accent */
-  --bg: #d9e0cf; --bg-elev: #cad2bb; --card: #eef1e6;
-  --text: #351e28; --muted: #857a73; --line: #bcc3ac;
-  --accent: #ff5c34; --gold: #ff5c34;
-  --dot: rgba(53, 30, 40, 0.06);
-  --h1: rgba(255, 92, 52, 0.16); --h2: rgba(255, 92, 52, 0.42);
-  --h3: rgba(255, 92, 52, 0.70); --h4: #ff5c34;
-  --shadow: rgba(53, 30, 40, 0.16);
+:root[data-theme="bakery"] {
+  /* warm bakery: cream paper · toasty-brown ink · golden caramel accent */
+  --bg: #f5ecd9; --bg-elev: #efe2c9; --card: #fbf4e6;
+  --text: #5b3a1c; --muted: #a8916f; --line: #e2d2b0;
+  --accent: #c47e2c; --gold: #c47e2c;
+  --dot: rgba(91, 58, 28, 0.06);
+  --h1: rgba(196, 126, 44, 0.18); --h2: rgba(196, 126, 44, 0.44);
+  --h3: rgba(196, 126, 44, 0.72); --h4: #c47e2c;
+  --shadow: rgba(91, 58, 28, 0.18);
 }
 
 :root[data-theme="gallery"] {
@@ -188,6 +188,10 @@ body::after {
   font-style: normal; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.16em; font-size: 17px;
 }
+
+/* Bakery: warm croissant touch */
+:root[data-theme="bakery"] .wordmark::after { content: " 🥐"; font-size: 18px; margin-left: 4px; vertical-align: middle; }
+:root[data-theme="bakery"] .thankyou::after { content: " 🥐"; font-size: 18px; }
 
 /* French salon: dainty line-art ribbons & pearls */
 :root[data-theme="french"] .wordmark::after {
