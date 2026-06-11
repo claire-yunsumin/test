@@ -78,6 +78,16 @@
   --shadow: rgba(0, 0, 0, 0.5);
 }
 
+:root[data-theme="gallery"] {
+  --bg: #d7d7d4; --bg-elev: #e8e6e1; --card: #f3f1ec;
+  --text: #1c1c1a; --muted: #8d8b85; --line: #c3c1ba;
+  --accent: #1c1c1a; --gold: #1c1c1a;
+  --dot: rgba(28, 28, 26, 0.05);
+  --h1: rgba(28, 28, 26, 0.12); --h2: rgba(28, 28, 26, 0.30);
+  --h3: rgba(28, 28, 26, 0.55); --h4: #1c1c1a;
+  --shadow: rgba(0, 0, 0, 0.12);
+}
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html { transition: background 0.25s ease, color 0.25s ease; }
@@ -129,6 +139,45 @@ body::after {
   font-family: var(--script); font-style: italic; font-weight: 600;
   font-size: 30px; line-height: 1; color: var(--text);
 }
+/* Gallery: minimal editorial — thin lines, no ruled paper, serif header */
+:root[data-theme="gallery"] .topbar,
+:root[data-theme="gallery"] .check-top,
+:root[data-theme="gallery"] .check-field,
+:root[data-theme="gallery"] .tabs,
+:root[data-theme="gallery"] .tab,
+:root[data-theme="gallery"] .habit,
+:root[data-theme="gallery"] .habit-emoji,
+:root[data-theme="gallery"] .stat-card,
+:root[data-theme="gallery"] .chip,
+:root[data-theme="gallery"] .tally-item,
+:root[data-theme="gallery"] .cal-cell,
+:root[data-theme="gallery"] .day-row,
+:root[data-theme="gallery"] .day-row-emoji,
+:root[data-theme="gallery"] .icon-btn,
+:root[data-theme="gallery"] .back-btn,
+:root[data-theme="gallery"] .cal-nav button,
+:root[data-theme="gallery"] .btn,
+:root[data-theme="gallery"] .reminder-row,
+:root[data-theme="gallery"] .reminder-row input[type="time"],
+:root[data-theme="gallery"] .sheet,
+:root[data-theme="gallery"] .emoji-opt,
+:root[data-theme="gallery"] #nameInput,
+:root[data-theme="gallery"] .check,
+:root[data-theme="gallery"] .edit-btn,
+:root[data-theme="gallery"] .dot,
+:root[data-theme="gallery"] .bar-track {
+  border-width: 1px !important;
+  border-color: var(--line) !important;
+}
+:root[data-theme="gallery"] .habit,
+:root[data-theme="gallery"] .sheet { background-image: none !important; }
+:root[data-theme="gallery"] .serial { border-width: 1px; }
+:root[data-theme="gallery"] .wordmark {
+  font-family: "Didot", "Bodoni 72", Georgia, "Times New Roman", serif;
+  font-style: normal; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.16em; font-size: 17px;
+}
+
 /* French salon: dainty line-art ribbons & pearls */
 :root[data-theme="french"] .wordmark::after {
   content: ""; display: inline-block; width: 27px; height: 19px; margin-left: 8px;
