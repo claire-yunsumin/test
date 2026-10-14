@@ -1,0 +1,23 @@
+{
+  "name": "daystitch-life-journal",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "idb": "^8.0.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.1",
+    "typescript": "~5.7.3",
+    "vite": "^6.0.5",
+    "vue-tsc": "^2.2.0",
+    "vitest": "^2.1.8"
+  }
+}
